@@ -427,7 +427,7 @@ plotDist <- function (dataset,dist) {
   
 }
 
-generateMvtDist<-function(dist,mu_vector,sigma_vector,rho_vector) {
+generateMvtDist<-function(n,dist,mu_vector,sigma_vector,rho_vector) {
   
   if(dist=="NO") {
     require(MASS)

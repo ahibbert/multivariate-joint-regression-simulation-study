@@ -7,14 +7,13 @@ options(scipen=999)
 ############################1. Generate Data#################
 
 dist="NO";mu_vector=c(1,2,3);sigma_vector=c(1,2,3);rho_vector=c(.4,.5,.6);n=1000
-
 #BIVARIATE### dist="NO";mu_vector=c(1,2);sigma_vector=c(1,2);rho_vector=c(.7);n=1000
 
 rho_matrix=matrix(0,ncol=length(mu_vector),nrow=length(mu_vector))
 rho_matrix[lower.tri(rho_matrix,diag=FALSE)]<-rho_vector
 rho_matrix[upper.tri(rho_matrix,diag=FALSE)]<-rho_vector
 
-dataset<-generateMvtDist(dist,mu_vector,sigma_vector,rho_matrix)
+dataset<-generateMvtDist(n,dist,mu_vector,sigma_vector,rho_matrix)
 
 plotDist(dataset,dist)
 
