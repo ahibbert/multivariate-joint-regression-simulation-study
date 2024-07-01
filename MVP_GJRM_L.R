@@ -129,16 +129,16 @@ plotDist(dataset,"ZISICHEL")
 
 #### 2. Benchmark models ####
 
-###### Regular ZISICHEL Global Deviance: 47647.01
+###### Regular ZISICHEL logLik(gamlss_model) = -13591.09 (df=8) AIC: 27198.18 | 27250.86
 margin_model_formula=formula(response~(age)+as.factor(gender)+as.factor(time))
 gamlss_model <- gamlss(formula = margin_model_formula,family="ZISICHEL",data=dataset)
 summary(gamlss_model)
 plot(gamlss_model)
 term.plot(gamlss_model)
 
-###### GLMM ZISICHEL Global Deviance: 47647.01
-margin_model_formula=formula(response~(age)+as.factor(gender)+as.factor(time)+random(as.factor(subject)))
-gamlss_glmm_model <- gamlss(formula = margin_model_formula,family="ZISICHEL",data=dataset)
+###### GLMM ZISICHEL logLik(gamlss_glmm_model) = -11187.34 (df=1042.17) AIC: 24459.02 | BIC: 31322.54
+margin_model_formula_glmm=formula(response~(age)+as.factor(gender)+as.factor(time)+random(as.factor(subject)))
+gamlss_glmm_model <- gamlss(formula = margin_model_formula_glmm,family="ZISICHEL",data=dataset)
 summary(gamlss_glmm_model)
 plot(gamlss_glmm_model)
 term.plot(gamlss_glmm_model)
@@ -155,6 +155,8 @@ fitted_margins<-fit_margins(mu.formula=formula(response~age+as.factor(gender)),d
   #term.plot(fitted_margins[[2]])
 
 fitted_copulas<-fit_copulas(fitted_margins,copula_dist="N",method="novine")
+#fitted_copulas<-fit_copulas(fitted_margins,copula_dist="N",method="vine")
+#likelihood_fitted_margin_copula(fitted_margins,fitted_copulas) ###Not much better results with vine versus optimising non-vine
 #contour(fitted_copulas)
 
 
@@ -330,7 +332,6 @@ calc_joint_likelihood <- function(input_par,start_fitted_margins,margin_dist,cop
   )
 }
   
-
 results= calc_joint_likelihood(input_par = start_par
                       ,start_fitted_margins = fitted_margins
                       ,margin_dist = ZISICHEL(
@@ -342,6 +343,9 @@ results= calc_joint_likelihood(input_par = start_par
                       copula_dist="N",
                       return_option="list"
                       )
+
+results$log_lik_results # LogLik=12980.0415
+-results$log_lik_results["Total"]*2+2*length(start_par) #AIC= 26,004 | 
 
 optim_results=optim(start_par
       ,calc_joint_likelihood
@@ -357,8 +361,6 @@ optim_results=optim(start_par
       , control=list(fnscale=-1,trace=3)
       , hessian=TRUE
       )
-
-
 
 #2. Be able to iterate parameters in direction of optimal
 
