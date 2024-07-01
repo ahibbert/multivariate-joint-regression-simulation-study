@@ -387,7 +387,7 @@ plotDist <- function (dataset,dist) {
   margin_fit=list()
   
   for (i in 1:num_margins) {
-    margin_data[[i]]<-(dataset[dataset[,"time"]==i-1,"random_variable"])
+    margin_data[[i]]<-dataset[dataset[,"time"]==i,"response"]
     margin_fit[[i]]<-gamlss(margin_data[[i]]~1,family=dist)
     margin_unif[[i]]<-pnorm(margin_fit[[i]]$residuals)
   }
