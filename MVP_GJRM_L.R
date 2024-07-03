@@ -11,6 +11,8 @@ library(gamlss)
 library(VineCopula)
 #library(copula)
 
+dataset
+
 #### 0. Functions ####
 
 create_longitudinal_dataset <- function(response,covariates,labels=NA) {
@@ -326,8 +328,8 @@ calc_joint_likelihood <- function(input_par,start_fitted_margins,margin_dist,cop
     derivatives_calculated_all_margins[[margin_number]]=derivatives_calculated
   }
   
-  return_list=list(log_lik_results,margin_d,margin_p,copula_d,dldth,dldth2,d2ldth,d2ldth2,margin_dist,eta,eta_linkinv,derivatives_calculated_all_margins)
-  names(return_list)=c("log_lik_results","margin_d","margin_p","copula_d","dldth","dldth2","d2ldth","d2ldth2","margin_dist","eta","eta_linkinv","derivatives_calculated_all_margins")
+  return_list=list(log_lik_results,margin_d,margin_p,copula_d,dldth,dldth2,d2ldth,d2ldth2,margin_dist,copula_dist,eta,eta_linkinv,derivatives_calculated_all_margins)
+  names(return_list)=c("log_lik_results","margin_d","margin_p","copula_d","dldth","dldth2","d2ldth","d2ldth2","margin_dist","copula_dist","eta","eta_linkinv","derivatives_calculated_all_margins")
   
   if (return_option == "list") {
     print("Log Likelihoods:")
@@ -342,7 +344,7 @@ calc_joint_likelihood <- function(input_par,start_fitted_margins,margin_dist,cop
   )
 }
   
-results= calc_joint_likelihood(input_par =start_par  #optim_results$par
+results= calc_joint_likelihood(input_par =start_par*.5  #optim_results$par
                       ,start_fitted_margins = fitted_margins
                       ,margin_dist = ZISICHEL(
                         mu.link = "log",
@@ -374,6 +376,37 @@ optim_results=optim(start_par
       , control=list(fnscale=-1,trace=3)
       , hessian=TRUE
       )
+
+grad_l<-grad(calc_joint_likelihood,
+              , x=start_par
+               ,start_fitted_margins = fitted_margins
+               ,margin_dist = ZISICHEL(
+                 mu.link = "log",
+                 sigma.link = "log",
+                 nu.link = "identity",
+                 tau.link = "logit"
+               )
+               , copula_dist="t"
+               , return_option="log_lik"
+)
+grad_l
+
+hessian_l<-hessian(calc_joint_likelihood,
+             , x=start_par
+             ,start_fitted_margins = fitted_margins
+             ,margin_dist = ZISICHEL(
+               mu.link = "log",
+               sigma.link = "log",
+               nu.link = "identity",
+               tau.link = "logit"
+             )
+             , copula_dist="t"
+             , return_option="log_lik"
+)
+hessian_l
+sqrt(diag(solve(-hessian)))
+
+numDeriv::hessian()
 
 #### Extract parameters and SE from separate and jointly optimised datasets -> all_out_combined ####
 library("MASS")
@@ -413,72 +446,100 @@ round(all_out_combined,3)
 
 ####TAKES results as input
 
-#Add theta
-#Add numderiv weights
+#Make theta unconstrained
+#Backfitting
+#Check things against numderiv
+
+margin_dist=results$margin_dist
+copula_dist=results$copula_dist
 
 steps_all=list()
 par_out=list()
-margin_dist=ZISICHEL()
+first_run=TRUE
+phi=.1
 
 for (i in 1:num_margins) {
 # NOTE: par is standing in place of mu/sigma/tau/nu
   
+  library(numDeriv)
+  
   eta=results$eta[[i]][,c(1:4)]
-  
-  i=1
-  results$dldth[,i]
-  results$dldth2[,i]
-  results$d2ldth[,i]
-  results$d2ldth2[,i]
-  
-  results$d2ldth
   
   #Are these gradients of the right likelihood function?
   dldpar=results$derivatives_calculated_all_margins[[i]][,c("dldm","dldd","dldv","dldt")] #First derivative of log likelihood w.r.t. parameters
   d2ldpar=results$derivatives_calculated_all_margins[[i]][,c("d2ldm2","d2ldd2","d2ldv2","d2ldt2")] #Quasi newton second derivative of log function w.r.t parameters
   dpardeta=results$derivatives_calculated_all_margins[[i]][,c("mu.dr","sigma.dr","nu.dr","tau.dr")] #Derivative of inverse link function
   
+  if (i<num_margins) {
+
+    dldth=results$dldth[,i]
+    dldth2=results$dldth2[,i]
+    d2ldth=results$d2ldth[,i] ########I DON"T THINK THESE ARE LIKELIHOOD FUNCTIONS
+    d2ldth2=results$d2ldth2[,i]
+    
+    theta_par_temp=start_par[names(start_par)[grepl(paste(i,i+1,sep=","),names(start_par))]]
+    
+    dldpar=cbind(dldpar,dldth,dldth2)
+    d2ldpar=cbind(d2ldpar,d2ldth,d2ldth2)
+    dpardeta=cbind(dpardeta,matrix(1,nrow=nrow(dldpar),ncol=2))
+    
+    eta=cbind(eta,matrix(theta_par_temp[1],ncol=1,nrow=nrow(dldpar)),matrix(theta_par_temp[2],ncol=1,nrow=nrow(dldpar)))
+    colnames(eta)[5:6]=c("theta1",'theta2')
+    
+  }
+  
   #u_k
   u_k=dldeta = dldpar * dpardeta
   head(dldpar);head(dpardeta);head(dldeta)
   
-  par(mfrow=c(2,2))
-  hist(dldpar[,1],main="dldmu")
-  hist(dldpar[,2],main="dldsigma")
-  hist(dldpar[,3],main="dldnu")
-  hist(dldpar[,4],main="dldtau")
+  #par(mfrow=c(2,2))
+  #hist(dldpar[,1],main="dldmu")
+  #hist(dldpar[,2],main="dldsigma")
+  #hist(dldpar[,3],main="dldnu")
+  #hist(dldpar[,4],main="dldtau")
   
   #f_k and w_k
   #f_k_quasi_newton=(-(dldpar*dldpar))
   f_k=-dldpar*dldpar
     
-  ######################################w_k=-f_k*(dpardeta*dpardeta)
-  w_k=matrix(1,ncol=4,nrow=nrow(f_k)) ####Obviously weights are broken - come back to this!!!!!!!!!
+  w_k=-f_k*(dpardeta*dpardeta) ###OK so my dpardeta is right.... and my dldpar....
   
-  z_k=eta[,c(1:4)]+(1/w_k)*u_k  
+  if(first_run==TRUE) {
+    #round(cbind(head(matrix(fitted_margins[[1]]$mu.wt)), matrix(head(w_k[,"dldm"])),head(matrix(fitted_margins[[1]]$mu.wt))-matrix(head(w_k[,"dldm"]))),4)
+    #round(cbind(head(matrix(fitted_margins[[1]]$mu.wt)), matrix(head(w_k[,"dldd"])),head(matrix(fitted_margins[[1]]$mu.wt))-matrix(head(w_k[,"dldd"]))),4)
+    #round(cbind(head(matrix(fitted_margins[[1]]$mu.wt)), matrix(head(w_k[,"dldv"])),head(matrix(fitted_margins[[1]]$mu.wt))-matrix(head(w_k[,"dldv"]))),4)
+    #round(cbind(head(matrix(fitted_margins[[1]]$mu.wt)), matrix(head(w_k[,"dldt"])),head(matrix(fitted_margins[[1]]$mu.wt))-matrix(head(w_k[,"dldt"]))),4)
+    print(c(sum((matrix(fitted_margins[[i]]$mu.wt)-matrix((w_k[,"dldm"]))))/sum(matrix(fitted_margins[[i]]$mu.wt))
+    ,sum((matrix(fitted_margins[[i]]$sigma.wt)-matrix((w_k[,"dldd"]))))/sum(matrix(fitted_margins[[i]]$sigma.wt))
+    ,sum((matrix(fitted_margins[[i]]$nu.wt)-matrix((w_k[,"dldv"]))))/sum(matrix(fitted_margins[[i]]$nu.wt))
+    ,sum((matrix(fitted_margins[[i]]$tau.wt)-matrix((w_k[,"dldt"]))))/sum(matrix(fitted_margins[[i]]$tau.wt))))
+  }
   
-  a_value=1
-  steps=rbind(c(margin_dist$mu.linkinv((eta[a_value,])["mu"])
-                ,margin_dist$sigma.linkinv((eta[a_value,])["sigma"])
-                ,margin_dist$nu.linkinv((eta[a_value,])["nu"])
-                ,margin_dist$tau.linkinv((eta[a_value,])["tau"]))
-  ,(eta[a_value,c(1:4)])
-  ,(dldpar[a_value,])
-  ,(dpardeta[a_value,])
-  ,(dpardeta[a_value,]*dpardeta[a_value,])
-  ,(f_k[a_value,])
-  ,(w_k[a_value,])
-  ,(u_k[a_value,])
-  ,((1/w_k)*u_k)[a_value,]
-  ,(eta[,c(1:4)]+(1/w_k)*u_k)[a_value,]
-  ,c(margin_dist$mu.linkinv((z_k[a_value,])["mu"])
-     ,margin_dist$sigma.linkinv((z_k[a_value,])["sigma"])
-     ,margin_dist$nu.linkinv((z_k[a_value,])["nu"])
-     ,margin_dist$tau.linkinv((z_k[a_value,])["tau"])) )
-  rownames(steps)<-c("par","eta","dldpar","dpardeta","dpardeta^2","f_k","w_k","u_k","(1/w_k)*(u_k)","eta+(1/w_k)*u_k","par_new")
-  steps
+  #w_k=matrix(1,ncol=ncol(f_k),nrow=nrow(f_k)) ####Weights of 1
   
-  dataset[1,]
+  z_k=(1-phi)*eta  +phi*(eta+(w_k)*u_k)  
+  
+  #a_value=1
+  #steps=rbind(c(margin_dist$mu.linkinv((eta[a_value,])["mu"])
+  #              ,margin_dist$sigma.linkinv((eta[a_value,])["sigma"])
+  #              ,margin_dist$nu.linkinv((eta[a_value,])["nu"])
+  #              ,margin_dist$tau.linkinv((eta[a_value,])["tau"]))
+  #,(eta[a_value,])
+  #,(dldpar[a_value,])
+  #,(dpardeta[a_value,])
+  #,(dpardeta[a_value,]*dpardeta[a_value,])
+  #,(f_k[a_value,])
+  #,(w_k[a_value,])
+  #,(u_k[a_value,])
+  #,((1/w_k)*u_k)[a_value,]
+  #,(eta+(1/w_k)*u_k)[a_value,]
+  #,c(margin_dist$mu.linkinv((z_k[a_value,])["mu"])
+  #   ,margin_dist$sigma.linkinv((z_k[a_value,])["sigma"])
+  #   ,margin_dist$nu.linkinv((z_k[a_value,])["nu"])
+  #   ,margin_dist$tau.linkinv((z_k[a_value,])["tau"])) )
+  #rownames(steps)<-c("par","eta","dldpar","dpardeta","dpardeta^2","f_k","w_k","u_k","(1/w_k)*(u_k)","eta+(1/w_k)*u_k","par_new")
+  #steps
+
   
   #steps_mean=rbind(c(mean(margin_dist$mu.linkinv(eta[,"mu"])),
   #                   mean(margin_dist$sigma.linkinv(eta[,"sigma"])),
@@ -500,22 +561,33 @@ for (i in 1:num_margins) {
   #rownames(steps_mean)<-c("par","eta","dpardeta","dpardeta^2","f_k","w_k","u_k","(1/w_k)*(u_k)","eta+(1/w_k)*u_k","par_new")
   #steps_mean
   
-  steps_mean=rbind(c((margin_dist$mu.linkinv(mean(eta[,"mu"]))),
-                     (margin_dist$sigma.linkinv(mean(eta[,"sigma"]))),
-                     (margin_dist$nu.linkinv(mean(eta[,"nu"]))),
-                     (margin_dist$tau.linkinv(mean(eta[,"tau"]))))
-                   ,colMeans(eta[,c(1:4)])
+  start_par_temp=c((margin_dist$mu.linkinv(mean(eta[,"mu"]))),
+                   (margin_dist$sigma.linkinv(mean(eta[,"sigma"]))),
+                   (margin_dist$nu.linkinv(mean(eta[,"nu"]))),
+                   (margin_dist$tau.linkinv(mean(eta[,"tau"])))
+                   
+  )
+  end_par_temp=c((margin_dist$mu.linkinv(mean(z_k[,"mu"]))),
+                 (margin_dist$sigma.linkinv(mean(z_k[,"sigma"]))),
+                 (margin_dist$nu.linkinv(mean(z_k[,"nu"]))),
+                 (margin_dist$tau.linkinv(mean(z_k[,"tau"])))
+  )
+  
+  if (i < num_margins) {
+    start_par_temp=c(start_par_temp,    mean(eta[,5]),mean(eta[,6]))
+    end_par_temp=c(end_par_temp,mean(z_k[,"theta1"]),mean(z_k[,"theta2"]))
+  }
+  
+  steps_mean=rbind(start_par_temp
+                   ,colMeans(eta)
                    ,colMeans(dpardeta)
                    ,colMeans(dpardeta*dpardeta)
                    ,colMeans(f_k)
                    ,colMeans(w_k)
                    ,colMeans(u_k)
                    ,colMeans((1/w_k)*u_k)
-                   ,colMeans(eta[,c(1:4)]+(1/w_k)*u_k)
-                   ,c((margin_dist$mu.linkinv(mean(z_k[,"mu"]))),
-                      (margin_dist$sigma.linkinv(mean(z_k[,"sigma"]))),
-                      (margin_dist$nu.linkinv(mean(z_k[,"nu"]))),
-                      (margin_dist$tau.linkinv(mean(z_k[,"tau"]))))
+                   ,colMeans(eta+(1/w_k)*u_k)
+                   ,end_par_temp
   )
   rownames(steps_mean)<-c("par","eta","dpardeta","dpardeta^2","f_k","w_k","u_k","(1/w_k)*(u_k)","eta+(1/w_k)*u_k","par_new")
   steps_mean
@@ -525,6 +597,7 @@ for (i in 1:num_margins) {
   
 }
 
+steps_all
 par_out
 start_par
 
