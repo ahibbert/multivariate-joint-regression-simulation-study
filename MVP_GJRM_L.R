@@ -7,8 +7,9 @@
 #### 0. Starting parameters ####
 set.seed(1000);options(scipen=999);
 source("common_functions.R")
-library(copula)
 library(gamlss)
+library(VineCopula)
+#library(copula)
 
 #### 0. Functions ####
 
@@ -133,22 +134,22 @@ margin_model_formula=formula(response~(age)+as.factor(gender)+as.factor(time))
 gamlss_model <- gamlss(formula = margin_model_formula,family="ZISICHEL",data=dataset)
 summary(gamlss_model)
 plot(gamlss_model)
-term.plot(gamlss_model)
+#term.plot(gamlss_model)
 
 ###### GLMM ZISICHEL logLik(gamlss_glmm_model) = -11187.34 (df=1042.17) AIC: 24459.02 | BIC: 31322.54
 margin_model_formula_glmm=formula(response~(age)+as.factor(gender)+as.factor(time)+random(as.factor(subject)))
 gamlss_glmm_model <- gamlss(formula = margin_model_formula_glmm,family="ZISICHEL",data=dataset)
 summary(gamlss_glmm_model)
 plot(gamlss_glmm_model)
-term.plot(gamlss_glmm_model)
+#term.plot(gamlss_glmm_model)
 
-#### 3. Starting parameter models ####
+#### 3. Separate margin and copula models ####
 
 #Goal
 
-# 1. Starting fit for margins and copula
+# Starting fit for margins and copula
 #best_marginal_fits <- find_best_marginal_fits(dataset,type="counts") #Find best fit margins
-fitted_margins<-fit_margins(mu.formula=formula(response~age+as.factor(gender)),dataset=dataset,family=ZISICHEL())
+fitted_margins<-fit_margins(mu.formula=formula(response~age+as.factor(gender)),dataset=dataset,margin_dist=ZISICHEL())
   #AIC(fitted_margins[[1]])
   #plot(fitted_margins[[1]])
   #term.plot(fitted_margins[[2]])
@@ -208,15 +209,15 @@ extract_parameters_from_fitted <- function(fitted_margins,fitted_copulas) {
 
 start_par<-extract_parameters_from_fitted(fitted_margins,fitted_copulas)
 
-####Calculate Log Likelihood ####
+#### 4. Log likelihood calculation + optimisation with optim ####
 
 calc_joint_likelihood <- function(input_par,start_fitted_margins,margin_dist,copula_dist,return_option="list")  {
   #input_par=start_par
   tryCatch(
   {
   
-  #return_option="list"
-  
+  #return_option="list";start_fitted_margins=fitted_margins;input_par=start_par;copula_dist="t"
+    
   if(return_option=="list") {
     print("Starting parameters:")
     print(as.matrix(start_par))  
@@ -288,13 +289,17 @@ calc_joint_likelihood <- function(input_par,start_fitted_margins,margin_dist,cop
   theta1=as.vector(input_par[grepl("theta1", names(input_par))])
   theta2=as.vector(input_par[grepl("theta2", names(input_par))])
   
-  copula_d=dldth=d2ldth=matrix(nrow=observation_count,ncol=num_margins-1)
+  copula_d=dldth=d2ldth=dldth2=d2ldth2=matrix(nrow=observation_count,ncol=num_margins-1)
   for (margin_number in 1:(num_margins-1)) {
     copula_d[,margin_number]=BiCopPDF( margin_p[,margin_number],margin_p[,margin_number+1],family = as.vector(BiCopName(copula_dist)),par=theta1[margin_number],par2=theta2[margin_number])
     dldth[,margin_number]=BiCopDeriv(   margin_p[,margin_number],margin_p[,margin_number+1],family = as.vector(BiCopName(copula_dist)),par=theta1[margin_number],par2=theta2[margin_number],deriv="par",log=TRUE)
     d2ldth[,margin_number]=BiCopDeriv2( margin_p[,margin_number],margin_p[,margin_number+1],family = as.vector(BiCopName(copula_dist)),par=theta1[margin_number],par2=theta2[margin_number],deriv="par")
+    if (copula_dist=="t") {
+      dldth2[,margin_number]=BiCopDeriv(   margin_p[,margin_number],margin_p[,margin_number+1],family = as.vector(BiCopName(copula_dist)),par=theta1[margin_number],par2=theta2[margin_number],deriv="par2",log=TRUE)
+      d2ldth2[,margin_number]=BiCopDeriv2(   margin_p[,margin_number],margin_p[,margin_number+1],family = as.vector(BiCopName(copula_dist)),par=theta1[margin_number],par2=theta2[margin_number],deriv="par2")
+      }
   }
-  colnames(copula_d)=colnames(dldth)=colnames(d2ldth)=paste(1:(num_margins-1),",",2:(num_margins),sep="")
+  colnames(copula_d)=colnames(dldth)=colnames(d2ldth)=colnames(dldth2)=colnames(d2ldth2)=paste(1:(num_margins-1),",",2:(num_margins),sep="")
   
   #### Return Log Likelihood ####
   
@@ -321,8 +326,8 @@ calc_joint_likelihood <- function(input_par,start_fitted_margins,margin_dist,cop
     derivatives_calculated_all_margins[[margin_number]]=derivatives_calculated
   }
   
-  return_list=list(log_lik_results,margin_d,margin_p,copula_d,dldth,d2ldth,margin_dist,eta,eta_linkinv,derivatives_calculated_all_margins)
-  names(return_list)=c("log_lik_results","margin_d","margin_p","copula_d","dldth","d2ldth","margin_dist","eta","eta_linkinv","derivatives_calculated_all_margins")
+  return_list=list(log_lik_results,margin_d,margin_p,copula_d,dldth,dldth2,d2ldth,d2ldth2,margin_dist,eta,eta_linkinv,derivatives_calculated_all_margins)
+  names(return_list)=c("log_lik_results","margin_d","margin_p","copula_d","dldth","dldth2","d2ldth","d2ldth2","margin_dist","eta","eta_linkinv","derivatives_calculated_all_margins")
   
   if (return_option == "list") {
     print("Log Likelihoods:")
@@ -337,7 +342,7 @@ calc_joint_likelihood <- function(input_par,start_fitted_margins,margin_dist,cop
   )
 }
   
-results= calc_joint_likelihood(input_par =start_par*.5  #optim_results$par
+results= calc_joint_likelihood(input_par =start_par  #optim_results$par
                       ,start_fitted_margins = fitted_margins
                       ,margin_dist = ZISICHEL(
                         mu.link = "log",
@@ -349,6 +354,7 @@ results= calc_joint_likelihood(input_par =start_par*.5  #optim_results$par
                       return_option="list"
                       )
 
+observation_count=nrow(dataset[dataset$time==1,])
 results$log_lik_results*2 # LogLik=12980.0415
 df=length(start_par)+start_par["theta2 1,2"]+start_par["theta2 2,3"]-2
 -results$log_lik_results["Total"]*2+2*df #AIC= 26,004 | 
@@ -389,10 +395,11 @@ for (parameter in c("mu","sigma","nu","tau")) {
 }
 all_out_sorted
 
-
-for (i in 1:length(fitted_copulas)) {
-  out=(fitted_copulas[[i]])
-  all_out_sorted=rbind(all_out_sorted,rbind(c(out$par,out$se),c(out$par2,out$se2)))
+for (j in 1:2) {
+  for (i in 1:length(fitted_copulas)) {
+    out=(fitted_copulas[[i]])
+    all_out_sorted=rbind(all_out_sorted,c(as.numeric(out[paste("par",if(j==1){""}else{j},sep="")]),as.numeric(out[paste("se",if(j==1){""}else{j},sep="")])))
+    }
 }
 
 all_out_combined<-cbind(optim_par_results,all_out_sorted)[,c(4,5,2,3)]
@@ -400,21 +407,33 @@ colnames(all_out_combined)<-c("Sep. Est","Sep. SE", "Joint Est.","Joint SE")
 round(all_out_combined,3)
 
 
+#### 5. Newton Raphson optimisation ####
 
-#### Manual optimisation method ####
-
-#### Inner iteration ####
+#### 5.1 Inner iteration ####
 
 ####TAKES results as input
 
+#Add theta
+#Add numderiv weights
+
 steps_all=list()
 par_out=list()
+margin_dist=ZISICHEL()
 
 for (i in 1:num_margins) {
 # NOTE: par is standing in place of mu/sigma/tau/nu
   
   eta=results$eta[[i]][,c(1:4)]
   
+  i=1
+  results$dldth[,i]
+  results$dldth2[,i]
+  results$d2ldth[,i]
+  results$d2ldth2[,i]
+  
+  results$d2ldth
+  
+  #Are these gradients of the right likelihood function?
   dldpar=results$derivatives_calculated_all_margins[[i]][,c("dldm","dldd","dldv","dldt")] #First derivative of log likelihood w.r.t. parameters
   d2ldpar=results$derivatives_calculated_all_margins[[i]][,c("d2ldm2","d2ldd2","d2ldv2","d2ldt2")] #Quasi newton second derivative of log function w.r.t parameters
   dpardeta=results$derivatives_calculated_all_margins[[i]][,c("mu.dr","sigma.dr","nu.dr","tau.dr")] #Derivative of inverse link function
@@ -522,6 +541,20 @@ start_par
 
 
 
+
+#### Exploratory ####
+
+#### Theta by gender ####
+
+plotDist(dataset[dataset$gender==1,],dist="ZISICHEL")
+fitted_margins<-fit_margins(mu.formula=formula(response~age),dataset=dataset[dataset$gender==1,],family=ZISICHEL())
+#AIC(fitted_margins[[1]])
+#plot(fitted_margins[[1]])
+#term.plot(fitted_margins[[2]])
+
+fitted_copulas<-fit_copulas(fitted_margins,copula_dist="t",method="vine")
+summary(fitted_copulas)
+contour(fitted_copulas)
 
 
 
