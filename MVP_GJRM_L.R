@@ -11,8 +11,6 @@ library(gamlss)
 library(VineCopula)
 #library(copula)
 
-dataset
-
 #### 0. Functions ####
 
 create_longitudinal_dataset <- function(response,covariates,labels=NA) {
@@ -111,6 +109,28 @@ likelihood_fitted_margin_copula <- function(fitted_margins,fitted_copulas) {
   
 } ###List of gamlss objects, VineCopula object as input
 
+logit <- function(x) {
+  return(log(x/(1-x)))
+}
+
+logit_inv <- function(x) {
+  return(
+    exp(x)/(1+exp(x))
+  )
+}
+
+log_2plus <- function(x) {
+  return(
+    log(x-2)
+  )
+}
+
+log_2plus_inv <- function(x) {
+  return(
+    exp(x)+2
+  )
+}
+
 #### 1. Load RAND data subset and transform to standard longitudinal dataset #######
 
 load("Data/rand_mvt.rds")
@@ -182,7 +202,7 @@ print(log_lik_list)
 
 #1. Calculate likelihood for given set of parameters - see if we can put it into optim...
 
-extract_parameters_from_fitted <- function(fitted_margins,fitted_copulas) {
+extract_parameters_from_fitted <- function(fitted_margins,fitted_copulas,copula_link) {
   mu=list()
   sigma=list()
   nu=list()
@@ -200,8 +220,8 @@ extract_parameters_from_fitted <- function(fitted_margins,fitted_copulas) {
   
   theta1=theta2=vector()
   for (i in 1:length(fitted_copulas)) {
-    theta1[i]=fitted_copulas[[i]]$par
-    theta2[i]=fitted_copulas[[i]]$par2
+    theta1[i]=copula_link$theta.linkfun(fitted_copulas[[i]]$par)
+    theta2[i]=copula_link$zeta.linkfun(fitted_copulas[[i]]$par2)
     names(theta1)[i]=paste("theta1",names(fitted_copulas)[i])
     names(theta2)[i]=paste("theta2",names(fitted_copulas)[i])
   }
@@ -209,11 +229,13 @@ extract_parameters_from_fitted <- function(fitted_margins,fitted_copulas) {
   return(c(unlist(mu),unlist(sigma),unlist(nu),unlist(tau),theta1,theta2))
 }
 
-start_par<-extract_parameters_from_fitted(fitted_margins,fitted_copulas)
+copula_link=list(logit,logit_inv,log_2plus,log_2plus_inv)
+names(copula_link)=c("theta.linkfun","theta.linkinv","zeta.linkfun","zeta.linkinv")
+start_par<-extract_parameters_from_fitted(fitted_margins,fitted_copulas,copula_link)
 
 #### 4. Log likelihood calculation + optimisation with optim ####
 
-calc_joint_likelihood <- function(input_par,start_fitted_margins,margin_dist,copula_dist,return_option="list")  {
+calc_joint_likelihood <- function(input_par,start_fitted_margins,margin_dist,copula_dist,return_option="list",copula_link)  {
   #input_par=start_par
   tryCatch(
   {
@@ -288,8 +310,8 @@ calc_joint_likelihood <- function(input_par,start_fitted_margins,margin_dist,cop
   #observation_count=nrow(dataset[dataset$time==1,])
 
   #### Get density of the copula function for each pair of margins ####
-  theta1=as.vector(input_par[grepl("theta1", names(input_par))])
-  theta2=as.vector(input_par[grepl("theta2", names(input_par))])
+  theta1=copula_link$theta.linkinv(as.vector(input_par[grepl("theta1", names(input_par))]))
+  theta2=copula_link$zeta.linkinv(as.vector(input_par[grepl("theta2", names(input_par))]))
   
   copula_d=dldth=d2ldth=dldth2=d2ldth2=matrix(nrow=observation_count,ncol=num_margins-1)
   for (margin_number in 1:(num_margins-1)) {
@@ -299,7 +321,9 @@ calc_joint_likelihood <- function(input_par,start_fitted_margins,margin_dist,cop
     if (copula_dist=="t") {
       dldth2[,margin_number]=BiCopDeriv(   margin_p[,margin_number],margin_p[,margin_number+1],family = as.vector(BiCopName(copula_dist)),par=theta1[margin_number],par2=theta2[margin_number],deriv="par2",log=TRUE)
       d2ldth2[,margin_number]=BiCopDeriv2(   margin_p[,margin_number],margin_p[,margin_number+1],family = as.vector(BiCopName(copula_dist)),par=theta1[margin_number],par2=theta2[margin_number],deriv="par2")
-      }
+    }
+    eta[[margin_number]]=cbind(cbind(eta[[margin_number]],rep(copula_link$theta.linkfun(theta1[[margin_number]]),nrow(eta[[margin_number]]))),rep(copula_link$zeta.linkfun(theta2[[margin_number]]),nrow(eta[[margin_number]])))  
+    colnames(eta[[margin_number]])[(length(colnames(eta[[margin_number]]))-1):length(colnames(eta[[margin_number]]))]=c("theta1","theta2")
   }
   colnames(copula_d)=colnames(dldth)=colnames(d2ldth)=colnames(dldth2)=colnames(d2ldth2)=paste(1:(num_margins-1),",",2:(num_margins),sep="")
   
@@ -351,9 +375,10 @@ results= calc_joint_likelihood(input_par =start_par*.5  #optim_results$par
                         sigma.link = "log",
                         nu.link = "identity",
                         tau.link = "logit"
-                      ),
-                      copula_dist="t",
-                      return_option="list"
+                      )
+                      , copula_dist="t"
+                      , copula_link=copula_link
+                      , return_option="list"
                       )
 
 observation_count=nrow(dataset[dataset$time==1,])
@@ -372,6 +397,7 @@ optim_results=optim(start_par
         tau.link = "logit"
       )
       , copula_dist="t"
+      , copula_link=copula_link
       , return_option="log_lik"
       , control=list(fnscale=-1,trace=3)
       , hessian=TRUE
@@ -387,6 +413,7 @@ grad_l<-grad(calc_joint_likelihood,
                  tau.link = "logit"
                )
                , copula_dist="t"
+             , copula_link=copula_link
                , return_option="log_lik"
 )
 grad_l
@@ -401,12 +428,11 @@ hessian_l<-hessian(calc_joint_likelihood,
                tau.link = "logit"
              )
              , copula_dist="t"
+             , copula_link=copula_link
              , return_option="log_lik"
 )
 hessian_l
 sqrt(diag(solve(-hessian)))
-
-numDeriv::hessian()
 
 #### Extract parameters and SE from separate and jointly optimised datasets -> all_out_combined ####
 library("MASS")
@@ -439,16 +465,14 @@ all_out_combined<-cbind(optim_par_results,all_out_sorted)[,c(4,5,2,3)]
 colnames(all_out_combined)<-c("Sep. Est","Sep. SE", "Joint Est.","Joint SE")
 round(all_out_combined,3)
 
-
 #### 5. Newton Raphson optimisation ####
 
 #### 5.1 Inner iteration ####
 
 ####TAKES results as input
 
-#Make theta unconstrained
 #Backfitting
-#Check things against numderiv
+#Check things against numderiv2
 
 margin_dist=results$margin_dist
 copula_dist=results$copula_dist
@@ -461,9 +485,7 @@ phi=.1
 for (i in 1:num_margins) {
 # NOTE: par is standing in place of mu/sigma/tau/nu
   
-  library(numDeriv)
   
-  eta=results$eta[[i]][,c(1:4)]
   
   #Are these gradients of the right likelihood function?
   dldpar=results$derivatives_calculated_all_margins[[i]][,c("dldm","dldd","dldv","dldt")] #First derivative of log likelihood w.r.t. parameters
@@ -483,10 +505,9 @@ for (i in 1:num_margins) {
     d2ldpar=cbind(d2ldpar,d2ldth,d2ldth2)
     dpardeta=cbind(dpardeta,matrix(1,nrow=nrow(dldpar),ncol=2))
     
-    eta=cbind(eta,matrix(theta_par_temp[1],ncol=1,nrow=nrow(dldpar)),matrix(theta_par_temp[2],ncol=1,nrow=nrow(dldpar)))
-    colnames(eta)[5:6]=c("theta1",'theta2')
-    
-  }
+    eta=results$eta[[i]][,c("mu","sigma","nu","tau","theta1","theta2")]
+      
+  } else {eta=results$eta[[i]][,c("mu","sigma","nu","tau")]}
   
   #u_k
   u_k=dldeta = dldpar * dpardeta
