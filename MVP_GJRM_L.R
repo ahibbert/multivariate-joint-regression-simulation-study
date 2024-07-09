@@ -268,24 +268,24 @@ calc_joint_likelihood <- function(input_par,start_fitted_margins,margin_dist,cop
       }
       
       #### Get density of the copula function for each pair of margins ####
-      theta1=copula_link$theta.linkinv(as.vector(input_par[grepl("theta1", names(input_par))]))
+      theta=copula_link$theta.linkinv(as.vector(input_par[grepl("theta", names(input_par))]))
       zeta=copula_link$zeta.linkinv(as.vector(input_par[grepl("zeta", names(input_par))])) ###These are correct
       
       copula_d=dldth=d2ldth=dldth2=d2ldth2=dthdeta=dzdeta=matrix(nrow=observation_count,ncol=num_margins-1)
       for (margin_number in 1:(num_margins-1)) {
-        eta[[margin_number]]=cbind(cbind(eta[[margin_number]],rep(copula_link$theta.linkfun(theta1[[margin_number]]),nrow(eta[[margin_number]]))),rep(copula_link$zeta.linkfun(zeta[[margin_number]]),nrow(eta[[margin_number]])))  
-        colnames(eta[[margin_number]])[(length(colnames(eta[[margin_number]]))-1):length(colnames(eta[[margin_number]]))]=c("theta1","zeta")
+        eta[[margin_number]]=cbind(cbind(eta[[margin_number]],rep(copula_link$theta.linkfun(theta[[margin_number]]),nrow(eta[[margin_number]]))),rep(copula_link$zeta.linkfun(zeta[[margin_number]]),nrow(eta[[margin_number]])))  
+        colnames(eta[[margin_number]])[(length(colnames(eta[[margin_number]]))-1):length(colnames(eta[[margin_number]]))]=c("theta","zeta")
         
-        copula_d[,margin_number]=BiCopPDF( margin_p[,margin_number],margin_p[,margin_number+1],family = as.vector(BiCopName(copula_dist)),par=theta1[margin_number],par2=zeta[margin_number])
-        dldth[,margin_number]=BiCopDeriv(   margin_p[,margin_number],margin_p[,margin_number+1],family = as.vector(BiCopName(copula_dist)),par=theta1[margin_number],par2=zeta[margin_number],deriv="par",log=TRUE)
-        d2ldth[,margin_number]=BiCopDeriv2( margin_p[,margin_number],margin_p[,margin_number+1],family = as.vector(BiCopName(copula_dist)),par=theta1[margin_number],par2=zeta[margin_number],deriv="par")
+        copula_d[,margin_number]=BiCopPDF( margin_p[,margin_number],margin_p[,margin_number+1],family = as.vector(BiCopName(copula_dist)),par=theta[margin_number],par2=zeta[margin_number])
+        dldth[,margin_number]=BiCopDeriv(   margin_p[,margin_number],margin_p[,margin_number+1],family = as.vector(BiCopName(copula_dist)),par=theta[margin_number],par2=zeta[margin_number],deriv="par",log=TRUE)
+        d2ldth[,margin_number]=BiCopDeriv2( margin_p[,margin_number],margin_p[,margin_number+1],family = as.vector(BiCopName(copula_dist)),par=theta[margin_number],par2=zeta[margin_number],deriv="par")
         
-        dthdeta[,margin_number]=copula_link$dthdeta(eta[[margin_number]][,"theta1"])
+        dthdeta[,margin_number]=copula_link$dthdeta(eta[[margin_number]][,"theta"])
         dzdeta[,margin_number]=copula_link$dzdeta(eta[[margin_number]][,"zeta"])
         
         if (copula_dist=="t") {
-          dldth2[,margin_number]=BiCopDeriv(   margin_p[,margin_number],margin_p[,margin_number+1],family = as.vector(BiCopName(copula_dist)),par=theta1[margin_number],par2=zeta[margin_number],deriv="par2",log=TRUE)
-          d2ldth2[,margin_number]=BiCopDeriv2(   margin_p[,margin_number],margin_p[,margin_number+1],family = as.vector(BiCopName(copula_dist)),par=theta1[margin_number],par2=zeta[margin_number],deriv="par2")
+          dldth2[,margin_number]=BiCopDeriv(   margin_p[,margin_number],margin_p[,margin_number+1],family = as.vector(BiCopName(copula_dist)),par=theta[margin_number],par2=zeta[margin_number],deriv="par2",log=TRUE)
+          d2ldth2[,margin_number]=BiCopDeriv2(   margin_p[,margin_number],margin_p[,margin_number+1],family = as.vector(BiCopName(copula_dist)),par=theta[margin_number],par2=zeta[margin_number],deriv="par2")
         }
         
         
@@ -353,15 +353,15 @@ extract_parameters_from_fitted <- function(fitted_margins,fitted_copulas,copula_
     names(tau[[i]])=paste(names(tau[[i]]),i,sep=".")
   }  
   
-  theta1=zeta=vector()
+  theta=zeta=vector()
   for (i in 1:length(fitted_copulas)) {
-    theta1[i]=copula_link$theta.linkfun(fitted_copulas[[i]]$par)
+    theta[i]=copula_link$theta.linkfun(fitted_copulas[[i]]$par)
     zeta[i]=copula_link$zeta.linkfun(fitted_copulas[[i]]$par2)
-    names(theta1)[i]=paste("theta1",names(fitted_copulas)[i])
+    names(theta)[i]=paste("theta",names(fitted_copulas)[i])
     names(zeta)[i]=paste("zeta",names(fitted_copulas)[i])
   }
   
-  return(c(unlist(mu),unlist(sigma),unlist(nu),unlist(tau),theta1,zeta))
+  return(c(unlist(mu),unlist(sigma),unlist(nu),unlist(tau),theta,zeta))
 }
 
 #### 1. Load RAND data subset and transform to standard longitudinal dataset #######
@@ -394,10 +394,10 @@ gamlss_model <- gamlss(formula = response ~ as.factor(time)+as.factor(gender)+ag
                        , family="ZISICHEL",data=dataset,method=RS(50))
 summary(gamlss_model)
 plot(gamlss_model)
-term.plot(gamlss_model)
-term.plot(gamlss_model,what="sigma")
-term.plot(gamlss_model,what="nu")
-term.plot(gamlss_model,what="tau")
+#term.plot(gamlss_model)
+#term.plot(gamlss_model,what="sigma")
+#term.plot(gamlss_model,what="nu")
+#term.plot(gamlss_model,what="tau")
 
 ###### GLMM ZISICHEL logLik(gamlss_glmm_model) = -11187.34 (df=1042.17) AIC: 24459.02 | BIC: 31322.54
 #margin_model_formula_glmm=formula(response~(age)+as.factor(gender)+as.factor(time)+random(as.factor(subject)))
@@ -415,7 +415,7 @@ fitted_margins[[1]]=gamlss_model
 
 # Starting fit for margins and copula
 #best_marginal_fits <- find_best_marginal_fits(dataset,type="counts") #Find best fit margins
-fitted_margins<-fit_margins(mu.formula=formula(response~age+as.factor(gender)),dataset=dataset,margin_dist=ZISICHEL())
+#fitted_margins<-fit_margins(mu.formula=formula(response~age+as.factor(gender)),dataset=dataset,margin_dist=ZISICHEL())
   #AIC(fitted_margins[[1]])
   #plot(fitted_margins[[1]])
   #term.plot(fitted_margins[[2]])
@@ -427,6 +427,10 @@ fitted_copulas<-fit_copulas(fitted_margins,copula_dist="t",method="novine",datas
 #fitted_copulas$pair.logLik
 #likelihood_fitted_margin_copula(fitted_margins,fitted_copulas) ###Not much better results with vine versus optimising non-vine
 #contour(fitted_copulas)
+
+#Extract parameters from starting fits
+copula_link=list(logit,logit_inv,log_2plus,log_2plus_inv,dlogit,dlog_2plus)
+names(copula_link)=c("theta.linkfun","theta.linkinv","zeta.linkfun","zeta.linkinv","dthdeta","dzdeta")
 
 log_lik_list=vector()
 num_margins=length(unique(dataset$time))
@@ -451,11 +455,6 @@ print(log_lik_list)
 
 
 #### 4. Log likelihood calculation + optimisation with optim ####
-
-#Extract parameters from starting fits
-copula_link=list(logit,logit_inv,log_2plus,log_2plus_inv,dlogit,dlog_2plus)
-names(copula_link)=c("theta.linkfun","theta.linkinv","zeta.linkfun","zeta.linkinv","dthdeta","dzdeta")
-start_par<-extract_parameters_from_fitted(fitted_margins,fitted_copulas,copula_link)
 
 results= calc_joint_likelihood(input_par =start_par  #optim_results$par
                       ,start_fitted_margins = fitted_margins
@@ -617,7 +616,7 @@ newton_raphson_iteration=function(results,input_par,phi) {
     
   }
   
-  margin_score=score_function(eta=results$eta_nomargin[[1]][,c("mu","sigma","nu","tau")],dldpar=dldpar,dpardeta=dpardeta,phi=phi,verbose=FALSE) ##Returns updated value
+  margin_score=score_function(eta=results$eta_nomargin[[1]][,c("mu","sigma","nu","tau")],dldpar=dldpar,dpardeta=dpardeta,phi=phi,verbose=TRUE) ##Returns updated value
   
   ###For gamlss parameters
   parameter_names=c("mu","sigma","nu","tau")
@@ -652,11 +651,11 @@ newton_raphson_iteration=function(results,input_par,phi) {
     d2ldpar=cbind(d2ldth,d2ldth2)
     dpardeta=cbind(dthdeta,dzdeta)
     #dpardeta=dldpar*0+1
-    copula_score[[i]]=score_function(eta=results$eta[[i]][,c("theta1","zeta")],dldpar=dldpar,dpardeta=dpardeta,phi=phi,verbose=FALSE) ##Returns updated value
+    copula_score[[i]]=score_function(eta=results$eta[[i]][,c("theta","zeta")],dldpar=dldpar,dpardeta=dpardeta,phi=phi,verbose=TRUE) ##Returns updated value
   } 
   
   beta_new_cop=list()
-  parameter_names=c("theta1","zeta")
+  parameter_names=c("theta","zeta")
   
   #####TEMPORARY UNTIL WE FEED COP MM THROUGH RESULTS LIST
   mm_cop=list()
@@ -711,12 +710,15 @@ newton_raphson_iteration=function(results,input_par,phi) {
 
 #Starting parameters for iterations
 start_par<-extract_parameters_from_fitted(fitted_margins,fitted_copulas,copula_link)
-first_input_par=start_par*0.8 ####
+first_input_par=start_par ####
 
 #Newton Raphson iterations
+end_par_matrix=matrix(0,ncol=length(start_par),nrow=0)
+
 first_run=TRUE
 change=1
-while (abs(change) > .1 ) {
+run_counter=1
+while (abs(change) > .05 ) {
   if(!first_run) {start_log_lik=results$log_lik_results} else {input_par=first_input_par}
   #print(input_par)
   results= calc_joint_likelihood(input_par =input_par  #optim_results$par
@@ -748,11 +750,25 @@ while (abs(change) > .1 ) {
   end_par=iteration_out[[2]]
   input_par=end_par
   first_run=FALSE
+  end_par_matrix=rbind(end_par_matrix,end_par)
+  run_counter=run_counter+1
 }
 
+colnames(end_par_matrix)=names(end_par)
+pars=round(sqrt(ncol(end_par_matrix)),0)+1
+plot.new();par(mfrow=c(pars,pars))
+for (par_name in colnames(end_par_matrix)) {
+  print(par_name)
+  plot(1:nrow(end_par_matrix),end_par_matrix[,par_name],main=par_name)    
+}
+
+
+
+plot(1:nrow(end_par_matrix),end_par_matrix[,"theta 2,3"])
+plot(1:nrow(end_par_matrix),end_par_matrix[,"zeta 1,2"])
+plot(1:nrow(end_par_matrix),end_par_matrix[,"zeta 2,3"])
+end_par
 cbind(first_input_par,end_par)
-
-
 
 start_par[grepl('theta',names(start_par))]
 
@@ -760,8 +776,6 @@ c(copula_link$theta.linkinv(copula_score[[1]][1])
 ,copula_link$theta.linkinv(copula_score[[2]][1])
 ,copula_link$zeta.linkinv(copula_score[[1]][2])
 ,copula_link$zeta.linkinv(copula_score[[2]][2]))
-
-
 
 #### OK so we need a function(mu,sigma,nu,tau,theta,zeta) which returns derivatives again at the new point, and likelihood ideally.
 
@@ -778,7 +792,7 @@ end_par_temp=c((margin_dist$mu.linkinv(mean(z_k[,"mu"]))),
   
   if (i < num_margins) {
     start_par_temp=c(start_par_temp,    mean(eta[,5]),mean(eta[,6]))
-    end_par_temp=c(end_par_temp,mean(z_k[,"theta1"]),mean(z_k[,"zeta"]))
+    end_par_temp=c(end_par_temp,mean(z_k[,"theta"]),mean(z_k[,"zeta"]))
   }
   
   steps_mean=rbind(start_par_temp
