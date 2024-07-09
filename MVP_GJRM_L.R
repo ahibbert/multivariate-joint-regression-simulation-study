@@ -620,40 +620,103 @@ newton_raphson_iteration=function(results,input_par,phi) {
   
   margin_score=score_function(eta=results$eta_nomargin[[1]][,c("mu","sigma","nu","tau")],dldpar=dldpar,dpardeta=dpardeta,phi=phi,verbose=FALSE) ##Returns updated value
   
-  iwls_fun <- function() {
-    
-  }
-  
+  ###For gamlss parameters
   parameter_names=c("mu","sigma","nu","tau")
   e_k=margin_score$z_k#-results$eta_nomargin[[1]][,c("mu","sigma","nu","tau")]
   beta_r=list()
   for (margin_number in 1:length(results$mm_all)) {
+    beta_r[[margin_number]]=list()
     for (parameter_num in 1:length(results$mm_all[[margin_number]])) {
+      
       mm=results$mm_all[[margin_number]][[parameter_num]]
       X=as.matrix(mm)
       W=diag(margin_score$w_k[,parameter_num])
       e_k_par=e_k[,parameter_num]
-      beta_r[[parameter_num]]=solve(t(X)%*%W%*%X)%*%t(X)%*%W%*%e_k_par
-      rownames(beta_r[[parameter_num]])= paste(parameter_names[parameter_num],margin_number,rownames(beta_r[[parameter_num]]),sep=".")
+      beta_r[[margin_number]][[parameter_num]]=solve(t(X)%*%W%*%X)%*%t(X)%*%W%*%e_k_par
+      rownames(beta_r[[margin_number]][[parameter_num]])= paste(parameter_names[parameter_num],margin_number,rownames(beta_r[[margin_number]][[parameter_num]]),sep=".")
     }
   }
   
-  beta_new=beta_r[[1]]
-  for (i in 2:length(beta_r)) {
-    beta_new=rbind(beta_new,beta_r[[i]])
+  
+  
+  
+  ###For copula parameters
+  copula_score=list()
+  for (i in 1:ncol(results$dldth)) {
+    dldth=results$dldth[,i]
+    dldth2=results$dldth2[,i]
+    d2ldth=results$d2ldth[,i] ########I DON"T THINK THESE ARE LIKELIHOOD FUNCTIONS
+    d2ldth2=results$d2ldth2[,i]
+    dthdeta=results$dthdeta[,i]
+    dzdeta=results$dzdeta[,i]
+    
+    theta_par_temp=start_par[names(start_par)[grepl(paste(i,i+1,sep=","),names(start_par))]]
+    
+    dldpar=cbind(dldth,dldth2)
+    d2ldpar=cbind(d2ldth,d2ldth2)
+    dpardeta=cbind(dthdeta,dzdeta)
+    #dpardeta=dldpar*0+1
+    copula_score[[i]]=score_function(eta=results$eta[[i]][,c("theta1","theta2")],dldpar=dldpar,dpardeta=dpardeta,phi=0.1) ##Returns updated value
+  } 
+  
+  beta_new_cop=list()
+  parameter_names=c("theta1","theta2")
+  
+  #####TEMPORARY UNTIL WE FEED COP MM THROUGH RESULTS LIST
+  mm_cop=list()
+  for (i in 1:length(copula_score)){
+    mm_cop[[i]]=list()
+    mm_cop[[i]]$theta=rep(1,nrow(copula_score[[i]]$z_k))
+    mm_cop[[i]]$zeta=rep(1,nrow(copula_score[[i]]$z_k))
   }
   
-  end_par=c(beta_new,start_par[16:19])
-  names(end_par)=c(rownames(beta_new),names(start_par[16:19]))
+  #-results$eta_nomargin[[1]][,c("mu","sigma","nu","tau")]
+  for (i in 1:length(copula_score)){
+    e_k=copula_score[[i]]$z_k  
+    beta_new_cop[[i]]=list()
+    for (j in 1:ncol(copula_score[[i]]$z_k)) {
+      mm=mm_cop[[i]][[j]]
+      X=as.matrix(mm)
+      W=diag(copula_score[[i]]$w_k[,j])
+      e_k_par=e_k[,j]
+      beta_new_cop[[i]][[parameter_names[j]]]=solve(t(X)%*%W%*%X)%*%t(X)%*%W%*%e_k_par
+      edge=paste(i,i+1,sep=",")
+      rownames(beta_new_cop[[i]][[parameter_names[j]]])= paste(parameter_names[j],edge,sep=" ")
+      #names(beta_new_cop[[j]])= paste(parameter_names[j],margin_number,rownames(beta_new_cop[[j]]),sep=".")
+    }
+    #beta_new_cop[[i]]
+  }
+  
+  beta_new=matrix(ncol=1,nrow=0)
+  colnames(beta_new)=c("Estimate")
+
+  for (i in 1:length(beta_r)) {
+    for (j in 1:length(beta_r[[i]]))
+      beta_new=rbind(beta_new,beta_r[[i]][[j]])
+  }
+  for (i in 1:length(beta_new_cop)) {
+    for (j in 1:length(beta_new_cop[[i]]))
+      beta_new=rbind(beta_new,beta_new_cop[[i]][[j]])
+  }
+  
+  
+  
+  end_par=beta_new
   
   return_list=list(input_par,end_par)
   names(return_list)=c("input_par","end_par")
   return(return_list)
 }
 
+
+
+########WORKING NEWTON RAPHSON ITERATIONS
+
+#Starting parameters for iterations
 start_par<-extract_parameters_from_fitted(fitted_margins,fitted_copulas,copula_link)
 input_par=start_par*0.8 ####
 
+#Newton Raphson iterations
 for (i in 1:100) {
   start_log_lik=results$log_lik_results
   results= calc_joint_likelihood(input_par =input_par  #optim_results$par
@@ -680,31 +743,9 @@ for (i in 1:100) {
   end_par=iteration_out[[2]]
   input_par=end_par
 }
-  
-  
-  end_log_lik=iteration_out$loglik["Total"]
-  print(c(start_log_lik,end_log_lik,end_log_lik-start_log_lik))
-  cbind(iteration_out[[1]],iteration_out[[2]])
-  input_par=end_par
 
-copula_score=list()
-for (i in 1:ncol(results$dldth)) {
-  dldth=results$dldth[,i]
-  dldth2=results$dldth2[,i]
-  d2ldth=results$d2ldth[,i] ########I DON"T THINK THESE ARE LIKELIHOOD FUNCTIONS
-  d2ldth2=results$d2ldth2[,i]
-  dthdeta=results$dthdeta[,i]
-  dzdeta=results$dzdeta[,i]
-  
-  theta_par_temp=start_par[names(start_par)[grepl(paste(i,i+1,sep=","),names(start_par))]]
-  
-  dldpar=cbind(dldth,dldth2)
-  d2ldpar=cbind(d2ldth,d2ldth2)
-  dpardeta=cbind(dthdeta,dzdeta)
-  #dpardeta=dldpar*0+1
-  copula_score[[i]]=score_function(eta=results$eta[[i]][,c("theta1","theta2")],dldpar=dldpar,dpardeta=dpardeta,phi=0.1) ##Returns updated value
-} 
-copula_score
+
+
 
 start_par[grepl('theta',names(start_par))]
 
