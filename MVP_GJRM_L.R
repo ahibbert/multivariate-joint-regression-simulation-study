@@ -160,6 +160,185 @@ dlog_2plus <- function(x) {
 }
 
 
+calc_joint_likelihood <- function(input_par,start_fitted_margins,margin_dist,copula_dist,return_option="list",copula_link,dataset,verbose=TRUE)  {
+  
+  #return_option="list";start_fitted_margins=fitted_margins;input_par=start_par;copula_dist="t";margin_dist = ZISICHEL(mu.link = "log",sigma.link = "log",nu.link = "identity",tau.link = "logit");
+  
+  tryCatch(
+    {
+      
+      if(return_option=="list" & verbose==TRUE) {
+        print("Starting parameters:")
+        print(as.matrix(input_par))  
+      }
+      
+      #### Get linear predictors and their linked value -> **Creates eta, eta_link_inv** ####
+      eta = eta_linkinv = list()
+      length_fitted_margins=length(start_fitted_margins)
+      margin_names=unique(dataset$time)
+      num_margins = length(margin_names)
+      observation_count = nrow(dataset[dataset$time==margin_names[1],])
+      
+      mm_all=list()
+      
+      for (margin_number in 1:length_fitted_margins) {
+        
+        mm_all[[margin_number]]=list()  
+        #########THIS IS WHERE I'M UP TO 
+        
+        if (length_fitted_margins==1) {
+          model_matrices = matrix(nrow = nrow(dataset), ncol = 5)
+          model_matrices_inv = matrix(nrow = nrow(dataset), ncol = 5)
+        } else {
+          model_matrices = matrix(nrow = observation_count, ncol = 5)
+          model_matrices_inv = matrix(nrow = observation_count, ncol = 5)
+        }
+        colnames(model_matrices)=colnames(model_matrices_inv)= c("mu", "sigma", "nu", "tau", "response")
+        
+        for (parameter in c("mu", "sigma", "nu", "tau")) {
+          par_temp <- input_par[grepl(paste(parameter,margin_number,sep="."), names(input_par))]
+          #par_temp <- par_temp[((margin_number - 1) * (length(par_temp) / num_margins) +
+          #                        1):(margin_number * (length(par_temp) / num_margins))]
+          
+          mm=model.matrix(start_fitted_margins[[margin_number]], what = parameter)
+          mm_all[[margin_number]][[parameter]]=mm
+          
+          model_matrices[, parameter] = rowSums(mm * matrix(rep(par_temp,each=nrow(mm)),ncol=length(par_temp),dimnames=list(NULL,c(names(par_temp))))) #These are the linear predictors
+          
+        }
+        model_matrices[, "response"] = dataset[dataset$time == margin_number, "response"]
+        
+        eta[[margin_number]] = model_matrices
+        
+        model_matrices_inv[, "mu"] = margin_dist$mu.linkinv(model_matrices[, "mu"])
+        model_matrices_inv[, "sigma"] = margin_dist$sigma.linkinv(model_matrices[, "sigma"])
+        model_matrices_inv[, "nu"] = margin_dist$nu.linkinv(model_matrices[, "nu"])
+        model_matrices_inv[, "tau"] = margin_dist$tau.linkinv(model_matrices[, "tau"])
+        
+        if (length_fitted_margins==1) {
+          model_matrices_inv[, "response"] = dataset[, "response"]
+        } else 
+        {
+          model_matrices_inv[, "response"] = dataset[dataset$time == margin_number, "response"]
+        }
+        
+        eta_linkinv[[margin_number]] = model_matrices_inv
+        
+      }
+      
+      eta_nomargin=eta
+      eta_linkinv_nomargin=eta_linkinv
+      
+      eta_temp=eta_linkinv_temp=list()
+      if(length_fitted_margins==1) {
+        for (i in margin_names) {
+          eta_temp[[i]]         =eta[[1]][dataset$time==i,]
+          eta_linkinv_temp[[i]] =eta_linkinv[[1]][dataset$time==i,]
+        }
+      }
+      eta=eta_temp
+      eta_linkinv=eta_linkinv_temp
+      
+      #### Get density and probability functions for the values from model -> ** Creates margin_p and margin_d ####
+      
+      margin_d=margin_p=matrix(nrow=observation_count,ncol=num_margins)
+      
+      for (margin_number in 1:num_margins) {
+        
+        margin_d[,margin_number] = dZISICHEL(eta_linkinv[[margin_number]][,"response"]
+                                             ,mu=    eta_linkinv[[margin_number]][,"mu"]
+                                             ,sigma= eta_linkinv[[margin_number]][,"sigma"]
+                                             ,nu=    eta_linkinv[[margin_number]][,"nu"]
+                                             ,tau=   eta_linkinv[[margin_number]][,"tau"])
+        
+        margin_p[,margin_number] = pZISICHEL(eta_linkinv[[margin_number]][,"response"]
+                                             ,mu=    eta_linkinv[[margin_number]][,"mu"]
+                                             ,sigma= eta_linkinv[[margin_number]][,"sigma"]
+                                             ,nu=    eta_linkinv[[margin_number]][,"nu"]
+                                             ,tau=   eta_linkinv[[margin_number]][,"tau"])
+        
+      }
+      
+      if(length_fitted_margins>1) {
+        for (margin_number in 1:num_margins) {
+          if(sum(log(margin_d[,margin_number]))-logLik(start_fitted_margins[[margin_number]])>1) {print("ERROR: margin_d does not agree with original gamlss LogLik - something has gone wrong!!!")}
+        }
+      } else {
+        if(sum(log(margin_d))-logLik(start_fitted_margins[[1]])>1) {print("ERROR: margin_d does not agree with original gamlss LogLik - something has gone wrong!!!")}
+      }
+      
+      #### Get density of the copula function for each pair of margins ####
+      theta1=copula_link$theta.linkinv(as.vector(input_par[grepl("theta1", names(input_par))]))
+      theta2=copula_link$zeta.linkinv(as.vector(input_par[grepl("theta2", names(input_par))])) ###These are correct
+      
+      copula_d=dldth=d2ldth=dldth2=d2ldth2=dthdeta=dzdeta=matrix(nrow=observation_count,ncol=num_margins-1)
+      for (margin_number in 1:(num_margins-1)) {
+        eta[[margin_number]]=cbind(cbind(eta[[margin_number]],rep(copula_link$theta.linkfun(theta1[[margin_number]]),nrow(eta[[margin_number]]))),rep(copula_link$zeta.linkfun(theta2[[margin_number]]),nrow(eta[[margin_number]])))  
+        colnames(eta[[margin_number]])[(length(colnames(eta[[margin_number]]))-1):length(colnames(eta[[margin_number]]))]=c("theta1","theta2")
+        
+        copula_d[,margin_number]=BiCopPDF( margin_p[,margin_number],margin_p[,margin_number+1],family = as.vector(BiCopName(copula_dist)),par=theta1[margin_number],par2=theta2[margin_number])
+        dldth[,margin_number]=BiCopDeriv(   margin_p[,margin_number],margin_p[,margin_number+1],family = as.vector(BiCopName(copula_dist)),par=theta1[margin_number],par2=theta2[margin_number],deriv="par",log=TRUE)
+        d2ldth[,margin_number]=BiCopDeriv2( margin_p[,margin_number],margin_p[,margin_number+1],family = as.vector(BiCopName(copula_dist)),par=theta1[margin_number],par2=theta2[margin_number],deriv="par")
+        
+        dthdeta[,margin_number]=copula_link$dthdeta(eta[[margin_number]][,"theta1"])
+        dzdeta[,margin_number]=copula_link$dzdeta(eta[[margin_number]][,"theta2"])
+        
+        if (copula_dist=="t") {
+          dldth2[,margin_number]=BiCopDeriv(   margin_p[,margin_number],margin_p[,margin_number+1],family = as.vector(BiCopName(copula_dist)),par=theta1[margin_number],par2=theta2[margin_number],deriv="par2",log=TRUE)
+          d2ldth2[,margin_number]=BiCopDeriv2(   margin_p[,margin_number],margin_p[,margin_number+1],family = as.vector(BiCopName(copula_dist)),par=theta1[margin_number],par2=theta2[margin_number],deriv="par2")
+        }
+        
+        
+      }
+      colnames(copula_d)=colnames(dthdeta)=colnames(dzdeta)=colnames(dldth)=colnames(d2ldth)=colnames(dldth2)=colnames(d2ldth2)=paste(1:(num_margins-1),",",2:(num_margins),sep="")
+      
+      #### Return Log Likelihood ####
+      
+      log_lik_results<-c(colSums(log(margin_d)),colSums(log(copula_d)),sum(colSums(log(margin_d)),colSums(log(copula_d))))
+      names(log_lik_results)[1:num_margins]=1:num_margins
+      names(log_lik_results)[length(log_lik_results)]="Total"
+      
+      #### Extract derivatives of margins ####
+      all_derivatives=c(names(margin_dist)[grepl("dl", names(margin_dist))],names(margin_dist)[grepl("d2l", names(margin_dist))],names(margin_dist)[grepl("dr", names(margin_dist))])
+      derivatives_calculated_all_margins=list()
+      
+      #Margin derivatives
+      
+      for (margin_number in 1:(length_fitted_margins)) {
+        i=1 #DON'T DELETE THIS - it's an internal counter
+        derivatives_calculated=matrix(nrow=(if(length_fitted_margins==1){nrow(dataset)}else{observation_count}),ncol=length((all_derivatives)))
+        for (d_fun in all_derivatives) { 
+          if (grepl("dr", d_fun) == TRUE) {
+            derivatives_calculated[,i]=margin_dist[[d_fun]](eta_nomargin[[margin_number]][,grepl(sub(".dr","",d_fun), colnames(eta_nomargin[[margin_number]]))])
+          } else {
+            derivatives_calculated[,i]=margin_dist[[d_fun]](y=eta_linkinv_nomargin[[margin_number]][,"response"],mu=eta_linkinv_nomargin[[margin_number]][,"mu"],sigma=eta_linkinv_nomargin[[margin_number]][,"sigma"],nu=eta_linkinv_nomargin[[margin_number]][,"nu"],tau=eta_linkinv_nomargin[[margin_number]][,"tau"])
+          }
+          i=i+1
+        }
+        colnames(derivatives_calculated)=all_derivatives
+        derivatives_calculated_all_margins[[margin_number]]=derivatives_calculated
+      }
+      
+      return_list=list(log_lik_results,margin_d,margin_p,copula_d,dldth,dldth2,d2ldth,d2ldth2,margin_dist,copula_dist,eta,eta_linkinv,derivatives_calculated_all_margins,eta_nomargin,eta_linkinv_nomargin,dthdeta,dzdeta,mm_all,start_par)
+      names(return_list)=c("log_lik_results","margin_d","margin_p","copula_d","dldth","dldth2","d2ldth","d2ldth2","margin_dist","copula_dist","eta","eta_linkinv","derivatives_calculated_all_margins","eta_nomargin","eta_linkinv_nomargin","dthdeta","dzdeta","mm_all","start_par")
+      
+      if (return_option == "list") {
+        if (verbose==TRUE) {
+          print("Log Likelihoods:")
+          print(log_lik_results)
+        }
+        return(return_list)}
+      if (return_option == "log_lik") {return(as.numeric(log_lik_results["Total"]))}
+    }, 
+    error = function(err) {
+      print("Function error")
+      return(NA)
+    }
+  )
+}
+
+
+
 #### 1. Load RAND data subset and transform to standard longitudinal dataset #######
 
 load("Data/rand_mvt.rds")
@@ -245,7 +424,7 @@ if(length_fitted_margins==1) {
 }
 print(log_lik_list)
 
-#### 4. 
+#### 4. Extract starting parameters from fitted
 
 extract_parameters_from_fitted <- function(fitted_margins,fitted_copulas,copula_link) {
   mu=list()
@@ -279,179 +458,6 @@ names(copula_link)=c("theta.linkfun","theta.linkinv","zeta.linkfun","zeta.linkin
 start_par<-extract_parameters_from_fitted(fitted_margins,fitted_copulas,copula_link)
 
 #### 4. Log likelihood calculation + optimisation with optim ####
-
-calc_joint_likelihood <- function(input_par,start_fitted_margins,margin_dist,copula_dist,return_option="list",copula_link,dataset)  {
-  
-  #return_option="list";start_fitted_margins=fitted_margins;input_par=start_par;copula_dist="t";margin_dist = ZISICHEL(mu.link = "log",sigma.link = "log",nu.link = "identity",tau.link = "logit");
-  
-  tryCatch(
-  {
-  
-  if(return_option=="list") {
-    print("Starting parameters:")
-    print(as.matrix(start_par))  
-  }
-
-  #### Get linear predictors and their linked value -> **Creates eta, eta_link_inv** ####
-  eta = eta_linkinv = list()
-  length_fitted_margins=length(start_fitted_margins)
-  margin_names=unique(dataset$time)
-  num_margins = length(margin_names)
-  observation_count = nrow(dataset[dataset$time==margin_names[1],])
-  
-  for (margin_number in 1:length_fitted_margins) {
-    
-    #########THIS IS WHERE I'M UP TO 
-    
-    if (length_fitted_margins==1) {
-      model_matrices = matrix(nrow = nrow(dataset), ncol = 5)
-      model_matrices_inv = matrix(nrow = nrow(dataset), ncol = 5)
-    } else {
-      model_matrices = matrix(nrow = observation_count, ncol = 5)
-      model_matrices_inv = matrix(nrow = observation_count, ncol = 5)
-    }
-    colnames(model_matrices)=colnames(model_matrices_inv)= c("mu", "sigma", "nu", "tau", "response")
-    
-    parameter="mu"
-    for (parameter in c("mu", "sigma", "nu", "tau")) {
-      par_temp <- input_par[grepl(paste(parameter,margin_number,sep="."), names(input_par))]
-      #par_temp <- par_temp[((margin_number - 1) * (length(par_temp) / num_margins) +
-      #                        1):(margin_number * (length(par_temp) / num_margins))]
-      
-      mm=model.matrix(start_fitted_margins[[margin_number]], what = parameter)
-      
-      model_matrices[, parameter] = rowSums(mm * matrix(rep(par_temp,each=nrow(mm)),ncol=length(par_temp),dimnames=list(NULL,c(names(par_temp))))) #These are the linear predictors
-    
-    }
-    model_matrices[, "response"] = dataset[dataset$time == margin_number, "response"]
-    
-    eta[[margin_number]] = model_matrices
-    
-    model_matrices_inv[, "mu"] = margin_dist$mu.linkinv(model_matrices[, "mu"])
-    model_matrices_inv[, "sigma"] = margin_dist$sigma.linkinv(model_matrices[, "sigma"])
-    model_matrices_inv[, "nu"] = margin_dist$nu.linkinv(model_matrices[, "nu"])
-    model_matrices_inv[, "tau"] = margin_dist$tau.linkinv(model_matrices[, "tau"])
-    
-    if (length_fitted_margins==1) {
-      model_matrices_inv[, "response"] = dataset[, "response"]
-    } else 
-    {
-      model_matrices_inv[, "response"] = dataset[dataset$time == margin_number, "response"]
-    }
-    
-    eta_linkinv[[margin_number]] = model_matrices_inv
-    
-  }
-  
-  eta_nomargin=eta
-  eta_linkinv_nomargin=eta_linkinv
-
-  eta_temp=eta_linkinv_temp=list()
-  if(length_fitted_margins==1) {
-    for (i in margin_names) {
-      eta_temp[[i]]         =eta[[1]][dataset$time==i,]
-      eta_linkinv_temp[[i]] =eta_linkinv[[1]][dataset$time==i,]
-    }
-  }
-  eta=eta_temp
-  eta_linkinv=eta_linkinv_temp
-  
-  #### Get density and probability functions for the values from model -> ** Creates margin_p and margin_d ####
-  
-  margin_d=margin_p=matrix(nrow=observation_count,ncol=num_margins)
-  
-  for (margin_number in 1:num_margins) {
-    
-    margin_d[,margin_number] = dZISICHEL(eta_linkinv[[margin_number]][,"response"]
-                                         ,mu=    eta_linkinv[[margin_number]][,"mu"]
-                                         ,sigma= eta_linkinv[[margin_number]][,"sigma"]
-                                         ,nu=    eta_linkinv[[margin_number]][,"nu"]
-                                         ,tau=   eta_linkinv[[margin_number]][,"tau"])
-    
-    margin_p[,margin_number] = pZISICHEL(eta_linkinv[[margin_number]][,"response"]
-                                         ,mu=    eta_linkinv[[margin_number]][,"mu"]
-                                         ,sigma= eta_linkinv[[margin_number]][,"sigma"]
-                                         ,nu=    eta_linkinv[[margin_number]][,"nu"]
-                                         ,tau=   eta_linkinv[[margin_number]][,"tau"])
-    
-  }
-
-  if(length_fitted_margins>1) {
-    for (margin_number in 1:num_margins) {
-      if(sum(log(margin_d[,margin_number]))-logLik(start_fitted_margins[[margin_number]])>1) {print("ERROR: margin_d does not agree with original gamlss LogLik - something has gone wrong!!!")}
-    }
-  } else {
-    if(sum(log(margin_d))-logLik(start_fitted_margins[[1]])>1) {print("ERROR: margin_d does not agree with original gamlss LogLik - something has gone wrong!!!")}
-  }
-
-  #### Get density of the copula function for each pair of margins ####
-  theta1=copula_link$theta.linkinv(as.vector(input_par[grepl("theta1", names(input_par))]))
-  theta2=copula_link$zeta.linkinv(as.vector(input_par[grepl("theta2", names(input_par))])) ###These are correct
-  
-  copula_d=dldth=d2ldth=dldth2=d2ldth2=dthdeta=dzdeta=matrix(nrow=observation_count,ncol=num_margins-1)
-  for (margin_number in 1:(num_margins-1)) {
-    eta[[margin_number]]=cbind(cbind(eta[[margin_number]],rep(copula_link$theta.linkfun(theta1[[margin_number]]),nrow(eta[[margin_number]]))),rep(copula_link$zeta.linkfun(theta2[[margin_number]]),nrow(eta[[margin_number]])))  
-    colnames(eta[[margin_number]])[(length(colnames(eta[[margin_number]]))-1):length(colnames(eta[[margin_number]]))]=c("theta1","theta2")
-    
-    copula_d[,margin_number]=BiCopPDF( margin_p[,margin_number],margin_p[,margin_number+1],family = as.vector(BiCopName(copula_dist)),par=theta1[margin_number],par2=theta2[margin_number])
-    dldth[,margin_number]=BiCopDeriv(   margin_p[,margin_number],margin_p[,margin_number+1],family = as.vector(BiCopName(copula_dist)),par=theta1[margin_number],par2=theta2[margin_number],deriv="par",log=TRUE)
-    d2ldth[,margin_number]=BiCopDeriv2( margin_p[,margin_number],margin_p[,margin_number+1],family = as.vector(BiCopName(copula_dist)),par=theta1[margin_number],par2=theta2[margin_number],deriv="par")
-    
-    dthdeta[,margin_number]=copula_link$dthdeta(eta[[margin_number]][,"theta1"])
-    dzdeta[,margin_number]=copula_link$dzdeta(eta[[margin_number]][,"theta2"])
-    
-    if (copula_dist=="t") {
-      dldth2[,margin_number]=BiCopDeriv(   margin_p[,margin_number],margin_p[,margin_number+1],family = as.vector(BiCopName(copula_dist)),par=theta1[margin_number],par2=theta2[margin_number],deriv="par2",log=TRUE)
-      d2ldth2[,margin_number]=BiCopDeriv2(   margin_p[,margin_number],margin_p[,margin_number+1],family = as.vector(BiCopName(copula_dist)),par=theta1[margin_number],par2=theta2[margin_number],deriv="par2")
-    }
-
-    
-  }
-  colnames(copula_d)=colnames(dthdeta)=colnames(dzdeta)=colnames(dldth)=colnames(d2ldth)=colnames(dldth2)=colnames(d2ldth2)=paste(1:(num_margins-1),",",2:(num_margins),sep="")
-
-  #### Return Log Likelihood ####
-  
-  log_lik_results<-c(colSums(log(margin_d)),colSums(log(copula_d)),sum(colSums(log(margin_d)),colSums(log(copula_d))))
-  names(log_lik_results)[1:num_margins]=1:num_margins
-  names(log_lik_results)[length(log_lik_results)]="Total"
-  
-  #### Extract derivatives of margins ####
-  all_derivatives=c(names(margin_dist)[grepl("dl", names(margin_dist))],names(margin_dist)[grepl("d2l", names(margin_dist))],names(margin_dist)[grepl("dr", names(margin_dist))])
-  derivatives_calculated_all_margins=list()
-  
-  #Margin derivatives
-  
-  for (margin_number in 1:(length_fitted_margins)) {
-    i=1 #DON'T DELETE THIS - it's an internal counter
-    derivatives_calculated=matrix(nrow=(if(length_fitted_margins==1){nrow(dataset)}else{observation_count}),ncol=length((all_derivatives)))
-    for (d_fun in all_derivatives) { 
-      if (grepl("dr", d_fun) == TRUE) {
-        derivatives_calculated[,i]=margin_dist[[d_fun]](eta_nomargin[[margin_number]][,grepl(sub(".dr","",d_fun), colnames(eta_nomargin[[margin_number]]))])
-      } else {
-        derivatives_calculated[,i]=margin_dist[[d_fun]](y=eta_linkinv_nomargin[[margin_number]][,"response"],mu=eta_linkinv_nomargin[[margin_number]][,"mu"],sigma=eta_linkinv_nomargin[[margin_number]][,"sigma"],nu=eta_linkinv_nomargin[[margin_number]][,"nu"],tau=eta_linkinv_nomargin[[margin_number]][,"tau"])
-      }
-      i=i+1
-    }
-    colnames(derivatives_calculated)=all_derivatives
-    derivatives_calculated_all_margins[[margin_number]]=derivatives_calculated
-  }
-  
-  return_list=list(log_lik_results,margin_d,margin_p,copula_d,dldth,dldth2,d2ldth,d2ldth2,margin_dist,copula_dist,eta,eta_linkinv,derivatives_calculated_all_margins,eta_nomargin,eta_linkinv_nomargin,dthdeta,dzdeta)
-  names(return_list)=c("log_lik_results","margin_d","margin_p","copula_d","dldth","dldth2","d2ldth","d2ldth2","margin_dist","copula_dist","eta","eta_linkinv","derivatives_calculated_all_margins","eta_nomargin","eta_linkinv_nomargin","dthdeta","dzdeta")
-  
-  if (return_option == "list") {
-    print("Log Likelihoods:")
-    print(log_lik_results)
-    return(return_list)}
-  if (return_option == "log_lik") {return(as.numeric(log_lik_results["Total"]))}
-  }, 
-  error = function(err) {
-    print("Function error")
-    return(NA)
-  }
-  )
-}
-
 results= calc_joint_likelihood(input_par =start_par*0.8  #optim_results$par
                       ,start_fitted_margins = fitted_margins
                       ,margin_dist = ZISICHEL(
@@ -563,11 +569,9 @@ round(all_out_combined,3)
 ####TAKES results as input
 
 #Backfitting
-#Check things against numderiv2
 
-start_par
-
-score_function <- function(eta,dldpar,dpardeta,phi=0.1,verbose=TRUE) {
+######STARTING PARAMETERS 
+score_function <- function(eta,dldpar,dpardeta,phi=1,verbose=TRUE) {
   #u_k
   u_k=dldeta = dldpar * dpardeta
   
@@ -579,7 +583,7 @@ score_function <- function(eta,dldpar,dpardeta,phi=0.1,verbose=TRUE) {
   
   #w_k=matrix(1,ncol=ncol(f_k),nrow=nrow(f_k)) ####Weights of 1
   
-  z_k=(1-phi)*eta+phi*(eta+(w_k)*u_k)  
+  z_k=(1-phi)*eta+phi*(eta+(u_k/w_k))
   
   if(verbose==TRUE) {
     steps_mean=round(rbind(colMeans(eta)
@@ -594,27 +598,94 @@ score_function <- function(eta,dldpar,dpardeta,phi=0.1,verbose=TRUE) {
     rownames(steps_mean)=c("eta","dpardeta","dpardeta2","f_k","w_k","u_k","(1/w_k)*u_k","z_k")
     print(steps_mean)  
   }
-  
-  return(colMeans(z_k))
+  return_list=list(colMeans(z_k),u_k,f_k,w_k,z_k)
+  names(return_list)=c("par","u_k","f_k","w_k","z_k")
+  return(return_list)
 }
 
-margin_dist=results$margin_dist
-copula_dist=results$copula_dist
-
-steps_all=list()
-par_out=list()
-
-for (i in 1:length(results$derivatives_calculated_all_margins)) {
-# NOTE: par is standing in place of mu/sigma/tau/nu
+newton_raphson_iteration=function(results,input_par,phi) {
+  margin_dist=results$margin_dist
+  copula_dist=results$copula_dist
   
-  #Are these gradients of the right likelihood function?
-  dldpar=results$derivatives_calculated_all_margins[[i]][,c("dldm","dldd","dldv","dldt")] #First derivative of log likelihood w.r.t. parameters
-  d2ldpar=results$derivatives_calculated_all_margins[[i]][,c("d2ldm2","d2ldd2","d2ldv2","d2ldt2")] #Quasi newton second derivative of log function w.r.t parameters
-  dpardeta=results$derivatives_calculated_all_margins[[i]][,c("mu.dr","sigma.dr","nu.dr","tau.dr")] #Derivative of inverse link function
+  steps_all=list()
+  par_out=list()
   
+  for (i in 1:length(results$derivatives_calculated_all_margins)) {
+    
+    dldpar=results$derivatives_calculated_all_margins[[i]][,c("dldm","dldd","dldv","dldt")] #First derivative of log likelihood w.r.t. parameters
+    d2ldpar=results$derivatives_calculated_all_margins[[i]][,c("d2ldm2","d2ldd2","d2ldv2","d2ldt2")] #Quasi newton second derivative of log function w.r.t parameters
+    dpardeta=results$derivatives_calculated_all_margins[[i]][,c("mu.dr","sigma.dr","nu.dr","tau.dr")] #Derivative of inverse link function
+    
+  }
+  
+  margin_score=score_function(eta=results$eta_nomargin[[1]][,c("mu","sigma","nu","tau")],dldpar=dldpar,dpardeta=dpardeta,phi=phi,verbose=FALSE) ##Returns updated value
+  
+  iwls_fun <- function() {
+    
+  }
+  
+  parameter_names=c("mu","sigma","nu","tau")
+  e_k=margin_score$z_k#-results$eta_nomargin[[1]][,c("mu","sigma","nu","tau")]
+  beta_r=list()
+  for (margin_number in 1:length(results$mm_all)) {
+    for (parameter_num in 1:length(results$mm_all[[margin_number]])) {
+      mm=results$mm_all[[margin_number]][[parameter_num]]
+      X=as.matrix(mm)
+      W=diag(margin_score$w_k[,parameter_num])
+      e_k_par=e_k[,parameter_num]
+      beta_r[[parameter_num]]=solve(t(X)%*%W%*%X)%*%t(X)%*%W%*%e_k_par
+      rownames(beta_r[[parameter_num]])= paste(parameter_names[parameter_num],margin_number,rownames(beta_r[[parameter_num]]),sep=".")
+    }
+  }
+  
+  beta_new=beta_r[[1]]
+  for (i in 2:length(beta_r)) {
+    beta_new=rbind(beta_new,beta_r[[i]])
+  }
+  
+  end_par=c(beta_new,start_par[16:19])
+  names(end_par)=c(rownames(beta_new),names(start_par[16:19]))
+  
+  return_list=list(input_par,end_par)
+  names(return_list)=c("input_par","end_par")
+  return(return_list)
 }
 
-margin_score=score_function(eta=results$eta_nomargin[[1]][,c("mu","sigma","nu","tau")],dldpar=dldpar,dpardeta=dpardeta,phi=0.1) ##Returns updated value
+start_par<-extract_parameters_from_fitted(fitted_margins,fitted_copulas,copula_link)
+input_par=start_par*0.8 ####
+
+for (i in 1:100) {
+  start_log_lik=results$log_lik_results
+  results= calc_joint_likelihood(input_par =input_par  #optim_results$par
+                               ,start_fitted_margins = fitted_margins
+                               ,margin_dist = ZISICHEL(
+                                 mu.link = "log",
+                                 sigma.link = "log",
+                                 nu.link = "identity",
+                                 tau.link = "logit"
+                               )
+                               , copula_dist="t"
+                               , copula_link=copula_link
+                               , return_option="list"
+                               , dataset=dataset
+                               ,verbose=FALSE
+                                )
+
+  end_log_lik=results$log_lik_results
+  log_lik_output=c(start_log_lik["Total"],end_log_lik["Total"],end_log_lik["Total"]-start_log_lik["Total"])
+  names(log_lik_output) = c("Start LogLik","End LogLik","Change")
+  print(log_lik_output)
+  iteration_out=newton_raphson_iteration(results,input_par,phi=.5)
+  cbind(iteration_out[[1]],iteration_out[[2]])
+  end_par=iteration_out[[2]]
+  input_par=end_par
+}
+  
+  
+  end_log_lik=iteration_out$loglik["Total"]
+  print(c(start_log_lik,end_log_lik,end_log_lik-start_log_lik))
+  cbind(iteration_out[[1]],iteration_out[[2]])
+  input_par=end_par
 
 copula_score=list()
 for (i in 1:ncol(results$dldth)) {
@@ -630,15 +701,24 @@ for (i in 1:ncol(results$dldth)) {
   dldpar=cbind(dldth,dldth2)
   d2ldpar=cbind(d2ldth,d2ldth2)
   dpardeta=cbind(dthdeta,dzdeta)
-  dpardeta=dldpar*0+1
+  #dpardeta=dldpar*0+1
   copula_score[[i]]=score_function(eta=results$eta[[i]][,c("theta1","theta2")],dldpar=dldpar,dpardeta=dpardeta,phi=0.1) ##Returns updated value
 } 
 copula_score
 
+start_par[grepl('theta',names(start_par))]
+
+c(copula_link$theta.linkinv(copula_score[[1]][1])
+,copula_link$theta.linkinv(copula_score[[2]][1])
+,copula_link$zeta.linkinv(copula_score[[1]][2])
+,copula_link$zeta.linkinv(copula_score[[2]][2]))
+
+
+
+
+
+
 #### OK so we need a function(mu,sigma,nu,tau,theta,zeta) which returns derivatives again at the new point, and likelihood ideally.
-
-
-
 
 start_par_temp=c((margin_dist$mu.linkinv(mean(eta[,"mu"]))),
                    (margin_dist$sigma.linkinv(mean(eta[,"sigma"]))),
