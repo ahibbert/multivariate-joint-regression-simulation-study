@@ -421,6 +421,10 @@ fitted_margins[[1]]=gamlss_model
   #term.plot(fitted_margins[[2]])
 
 fitted_copulas<-fit_copulas(fitted_margins,copula_dist="t",method="novine",dataset=dataset)
+#Extract parameters from starting fits
+copula_link=list(logit,logit_inv,log_2plus,log_2plus_inv,dlogit,dlog_2plus)
+names(copula_link)=c("theta.linkfun","theta.linkinv","zeta.linkfun","zeta.linkinv","dthdeta","dzdeta")
+
 #fitted_copulas<-fit_copulas(fitted_margins,copula_dist="N",method="vine")
 #contour(fitted_copulas)
 #summary(fitted_copulas)
@@ -428,9 +432,6 @@ fitted_copulas<-fit_copulas(fitted_margins,copula_dist="t",method="novine",datas
 #likelihood_fitted_margin_copula(fitted_margins,fitted_copulas) ###Not much better results with vine versus optimising non-vine
 #contour(fitted_copulas)
 
-#Extract parameters from starting fits
-copula_link=list(logit,logit_inv,log_2plus,log_2plus_inv,dlogit,dlog_2plus)
-names(copula_link)=c("theta.linkfun","theta.linkinv","zeta.linkfun","zeta.linkinv","dthdeta","dzdeta")
 
 log_lik_list=vector()
 num_margins=length(unique(dataset$time))
@@ -616,7 +617,7 @@ newton_raphson_iteration=function(results,input_par,phi) {
     
   }
   
-  margin_score=score_function(eta=results$eta_nomargin[[1]][,c("mu","sigma","nu","tau")],dldpar=dldpar,dpardeta=dpardeta,phi=phi,verbose=TRUE) ##Returns updated value
+  margin_score=score_function(eta=results$eta_nomargin[[1]][,c("mu","sigma","nu","tau")],dldpar=dldpar,dpardeta=dpardeta,phi=phi,verbose=FALSE) ##Returns updated value
   
   ###For gamlss parameters
   parameter_names=c("mu","sigma","nu","tau")
@@ -650,8 +651,8 @@ newton_raphson_iteration=function(results,input_par,phi) {
     dldpar=cbind(dldth,dldth2)
     d2ldpar=cbind(d2ldth,d2ldth2)
     dpardeta=cbind(dthdeta,dzdeta)
-    #dpardeta=dldpar*0+1
-    copula_score[[i]]=score_function(eta=results$eta[[i]][,c("theta","zeta")],dldpar=dldpar,dpardeta=dpardeta,phi=phi,verbose=TRUE) ##Returns updated value
+    dpardeta=dldpar*0+1
+    copula_score[[i]]=score_function(eta=results$eta[[i]][,c("theta","zeta")],dldpar=dldpar,dpardeta=dpardeta,phi=phi,verbose=FALSE) ##Returns updated value
   } 
   
   beta_new_cop=list()
@@ -710,7 +711,7 @@ newton_raphson_iteration=function(results,input_par,phi) {
 
 #Starting parameters for iterations
 start_par<-extract_parameters_from_fitted(fitted_margins,fitted_copulas,copula_link)
-first_input_par=start_par ####
+first_input_par=start_par*0.7 ####
 
 #Newton Raphson iterations
 end_par_matrix=matrix(0,ncol=length(start_par),nrow=0)
@@ -718,7 +719,7 @@ end_par_matrix=matrix(0,ncol=length(start_par),nrow=0)
 first_run=TRUE
 change=1
 run_counter=1
-while (abs(change) > .05 ) {
+while (abs(change) > .01 ) {
   if(!first_run) {start_log_lik=results$log_lik_results} else {input_par=first_input_par}
   #print(input_par)
   results= calc_joint_likelihood(input_par =input_par  #optim_results$par
@@ -754,82 +755,24 @@ while (abs(change) > .05 ) {
   run_counter=run_counter+1
 }
 
+####TESTING dpardeta for copula =1
+
+#Showing charts
 colnames(end_par_matrix)=names(end_par)
 pars=round(sqrt(ncol(end_par_matrix)),0)+1
-plot.new();par(mfrow=c(pars,pars))
+plot.new();par(mfrow=c(pars,pars-1))
 for (par_name in colnames(end_par_matrix)) {
-  print(par_name)
   plot(1:nrow(end_par_matrix),end_par_matrix[,par_name],main=par_name)    
 }
 
+c(mean(copula_link$theta.linkinv(end_par_matrix[,"theta 1,2"]))
+,mean(copula_link$theta.linkinv(end_par_matrix[,"theta 2,3"]))
+,mean(copula_link$zeta.linkinv(end_par_matrix[,"zeta 1,2"]))
+,mean(copula_link$zeta.linkinv(end_par_matrix[,"zeta 2,3"])))
 
-
-plot(1:nrow(end_par_matrix),end_par_matrix[,"theta 2,3"])
-plot(1:nrow(end_par_matrix),end_par_matrix[,"zeta 1,2"])
-plot(1:nrow(end_par_matrix),end_par_matrix[,"zeta 2,3"])
-end_par
-cbind(first_input_par,end_par)
-
-start_par[grepl('theta',names(start_par))]
-
-c(copula_link$theta.linkinv(copula_score[[1]][1])
-,copula_link$theta.linkinv(copula_score[[2]][1])
-,copula_link$zeta.linkinv(copula_score[[1]][2])
-,copula_link$zeta.linkinv(copula_score[[2]][2]))
-
-#### OK so we need a function(mu,sigma,nu,tau,theta,zeta) which returns derivatives again at the new point, and likelihood ideally.
-
-start_par_temp=c((margin_dist$mu.linkinv(mean(eta[,"mu"]))),
-                   (margin_dist$sigma.linkinv(mean(eta[,"sigma"]))),
-                   (margin_dist$nu.linkinv(mean(eta[,"nu"]))),
-                   (margin_dist$tau.linkinv(mean(eta[,"tau"])))
-)
-end_par_temp=c((margin_dist$mu.linkinv(mean(z_k[,"mu"]))),
-                 (margin_dist$sigma.linkinv(mean(z_k[,"sigma"]))),
-                 (margin_dist$nu.linkinv(mean(z_k[,"nu"]))),
-                 (margin_dist$tau.linkinv(mean(z_k[,"tau"])))
-)
-  
-  if (i < num_margins) {
-    start_par_temp=c(start_par_temp,    mean(eta[,5]),mean(eta[,6]))
-    end_par_temp=c(end_par_temp,mean(z_k[,"theta"]),mean(z_k[,"zeta"]))
-  }
-  
-  steps_mean=rbind(start_par_temp
-                   ,colMeans(eta)
-                   ,colMeans(dpardeta)
-                   ,colMeans(dpardeta*dpardeta)
-                   ,colMeans(f_k)
-                   ,colMeans(w_k)
-                   ,colMeans(u_k)
-                   ,colMeans((1/w_k)*u_k)
-                   ,colMeans(eta+(1/w_k)*u_k)
-                   ,end_par_temp
-  )
-  rownames(steps_mean)<-c("par","eta","dpardeta","dpardeta^2","f_k","w_k","u_k","(1/w_k)*(u_k)","eta+(1/w_k)*u_k","par_new")
-  steps_mean
-  
-  steps_all[[i]]=steps_mean
-  par_out[[i]]=steps_mean["eta+(1/w_k)*u_k",]
-  
-}
-
-steps_all
-par_out
-start_par
-
-
-#### Outer iteration ####
-
-
-
-
-#2. Be able to iterate parameters in direction of optimal
-
-#### Appendix ###
-
-
-
+new_versus_original=cbind(start_par,end_par_matrix[nrow(end_par_matrix),])
+colnames(new_versus_original)=c("Gamlss+VineCop","Manual")
+print(new_versus_original)
 
 
 #### Exploratory ####
