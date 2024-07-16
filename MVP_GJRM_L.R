@@ -163,7 +163,7 @@ dlog_2plus <- function(x) {
 calc_joint_likelihood <- function(input_par,start_fitted_margins,margin_dist,copula_dist,return_option="list",copula_link,dataset,verbose=TRUE)  {
   
   #return_option="list";start_fitted_margins=fitted_margins;input_par=start_par;copula_dist="t";margin_dist = ZISICHEL(mu.link = "log",sigma.link = "log",nu.link = "identity",tau.link = "logit");
-  
+    
   #tryCatch(
   #  {
       
@@ -321,8 +321,10 @@ calc_joint_likelihood <- function(input_par,start_fitted_margins,margin_dist,cop
         derivatives_calculated_all_margins[[margin_number]]=derivatives_calculated
       }
       
-      return_list=list(log_lik_results,margin_d,margin_p,copula_d,dldth,dldth2,d2ldth,d2ldth2,margin_dist,copula_dist,eta,eta_linkinv,derivatives_calculated_all_margins,eta_nomargin,eta_linkinv_nomargin,dthdeta,dzdeta,mm_all,start_par,dcdu1,dcdu2)
-      names(return_list)=c("log_lik_results","margin_d","margin_p","copula_d","dldth","dldth2","d2ldth","d2ldth2","margin_dist","copula_dist","eta","eta_linkinv","derivatives_calculated_all_margins","eta_nomargin","eta_linkinv_nomargin","dthdeta","dzdeta","mm_all","start_par","dcdu1","dcdu2")
+      response=dataset$response
+      
+      return_list=list(log_lik_results,response,margin_d,margin_p,copula_d,dldth,dldth2,d2ldth,d2ldth2,margin_dist,copula_dist,eta,eta_linkinv,derivatives_calculated_all_margins,eta_nomargin,eta_linkinv_nomargin,dthdeta,dzdeta,mm_all,start_par,dcdu1,dcdu2)
+      names(return_list)=c("log_lik_results","response","margin_d","margin_p","copula_d","dldth","dldth2","d2ldth","d2ldth2","margin_dist","copula_dist","eta","eta_linkinv","derivatives_calculated_all_margins","eta_nomargin","eta_linkinv_nomargin","dthdeta","dzdeta","mm_all","start_par","dcdu1","dcdu2")
       
       if (return_option == "list") {
         if (verbose==TRUE) {
@@ -459,7 +461,7 @@ print(log_lik_list)
 
 #### 4. Log likelihood calculation + optimisation with optim ####
 
-results= calc_joint_likelihood(input_par =end_par_matrix[nrow(end_par_matrix),]
+results_start= calc_joint_likelihood(input_par =start_par
                       ,start_fitted_margins = fitted_margins
                       ,margin_dist = ZISICHEL(
                         mu.link = "log",
@@ -509,15 +511,13 @@ grad_l<-grad(calc_joint_likelihood,
                )
                , copula_dist="t"
              , copula_link=copula_link
-               , return_option="log_lik_cop"
+               , return_option="log_lik"
              ,dataset=dataset
 )
 grad_l
 
-help(grad)
-
 hessian_l<-hessian(calc_joint_likelihood,
-             , x=start_par
+             , x=input_par
              ,start_fitted_margins = fitted_margins
              ,margin_dist = ZISICHEL(
                mu.link = "log",
@@ -528,9 +528,17 @@ hessian_l<-hessian(calc_joint_likelihood,
              , copula_dist="t"
              , copula_link=copula_link
              , return_option="log_lik"
+             ,dataset=dataset
 )
 hessian_l
-sqrt(diag(solve(-hessian)))
+
+
+########LATER
+new_SE=sqrt(diag(solve(-hessian_l)))
+old_SE=sqrt(diag(vcov(fitted_margins[[1]])))
+old_SE=c(old_SE,c(fitted_copulas$`1,2`$se,fitted_copulas$`2,3`$se, fitted_copulas$`1,2`$se2,fitted_copulas$`2,3`$se2))
+SEs=cbind(start_par,old_SE,end_par,new_SE)
+SEs
 
 #### Extract parameters and SE from separate and jointly optimised datasets -> all_out_combined ####
 library("MASS")
@@ -577,24 +585,27 @@ round(all_out_combined,3)
 #Backfitting
 
 ######STARTING PARAMETERS 
-score_function <- function(eta,dldpar,dpardeta,dlcopdpar,phi=1,verbose=TRUE) {
+score_function <- function(eta,dldpar,dpardeta,dlcopdpar,response,phi=1,step_size=1,verbose=TRUE) {
   #u_k
-  dldpar=dldpar#+dlcopdpar commented out for now until we come back and fix it
+  dlcopdpar=dlcopdpar*((dldpar)*response)
+  
+  dldpar=dldpar+dlcopdpar #commented out for now until we come back and fix it
   
   u_k=dldeta = dldpar * dpardeta
   
   #f_k and w_k
   #f_k_quasi_newton=(-(dldpar*dldpar))
-  f_k=-dldpar*dldpar
+  f_k=-(dldpar^2)
   
-  w_k=-f_k*(dpardeta*dpardeta) ###OK so my dpardeta is right.... and my dldpar....
+  w_k=-f_k*(dpardeta*dpardeta)
   
   #w_k=matrix(1,ncol=ncol(f_k),nrow=nrow(f_k)) ####Weights of 1
   
-  z_k=(1-phi)*eta+phi*(eta+(u_k/w_k))
+  z_k=(1-phi)*eta+phi*(eta+step_size*(u_k/w_k))
   
   if(verbose==TRUE) {
     steps_mean=round(rbind(colMeans(eta)
+                           ,colMeans(dldpar-dlcopdpar)
                            ,colMeans(dlcopdpar)
                            ,colMeans(dpardeta)
                            ,colMeans(dpardeta*dpardeta)
@@ -604,7 +615,7 @@ score_function <- function(eta,dldpar,dpardeta,dlcopdpar,phi=1,verbose=TRUE) {
                            ,colMeans((1/w_k)*u_k)
                            ,colMeans(z_k)
     ),8)
-    rownames(steps_mean)=c("eta","dlcopdpar","dpardeta","dpardeta2","f_k","w_k","u_k","(1/w_k)*u_k","z_k")
+    rownames(steps_mean)=c("eta","dldpar","dlcopdpar","dpardeta","dpardeta2","f_k","w_k","u_k","(1/w_k)*u_k","z_k")
     print(steps_mean)  
   }
   return_list=list(colMeans(z_k),u_k,f_k,w_k,z_k)
@@ -612,7 +623,10 @@ score_function <- function(eta,dldpar,dpardeta,dlcopdpar,phi=1,verbose=TRUE) {
   return(return_list)
 }
 
-newton_raphson_iteration=function(results,input_par,phi=1,verbose=c(FALSE,FALSE)) {
+newton_raphson_iteration=function(results,input_par,phi=1,step_size=1,verbose=c(FALSE,FALSE)) {
+  
+  #results=results_start
+  
   margin_dist=results$margin_dist
   copula_dist=results$copula_dist
   
@@ -629,8 +643,8 @@ newton_raphson_iteration=function(results,input_par,phi=1,verbose=c(FALSE,FALSE)
     d2ldth2=results$d2ldth2[,i]
     dthdeta=results$dthdeta[,i]
     dzdeta=results$dzdeta[,i]
-    dcdu1=results$dzdeta[,i]
-    dcdu2=results$dzdeta[,i]
+    dcdu1=results$dcdu1[,i]
+    dcdu2=results$dcdu2[,i]
     
     theta_par_temp=start_par[names(start_par)[grepl(paste(i,i+1,sep=","),names(start_par))]]
     
@@ -639,8 +653,16 @@ newton_raphson_iteration=function(results,input_par,phi=1,verbose=c(FALSE,FALSE)
     dpardeta=cbind(dthdeta,dzdeta)
     dpardeta=dldpar*0+1 ##########Temporary step
     
-    dlcopdpar[[i]]=dcdu1*dcdu2*(results$margin_d[,i]*results$margin_d[,i+1])/results$copula_d[,i]
-    copula_score[[i]]=score_function(eta=results$eta[[i]][,c("theta","zeta")],dldpar=dldpar,dpardeta=dpardeta,dlcopdpar=dldpar*0,phi=phi,verbose=verbose[2]) ##Returns updated value
+    #dpardeta=cbind(dthdeta,(dldpar*0+1)[,1])
+    
+    ##########
+    ##########
+    ########
+    dlcopdpar[[i]]=(dcdu1+dcdu2)/(results$copula_d[,i]) #+ (dcdu2)/results$copula_d[,i]  #*(results$margin_d[,i]*results$margin_d[,i+1])
+    ########
+    #######
+    ##########
+    copula_score[[i]]=score_function(eta=results$eta[[i]][,c("theta","zeta")],dldpar=dldpar,dpardeta=dpardeta,dlcopdpar=dldpar*0,response=dldpar*0,phi=phi,step_size=step_size,verbose=verbose[2]) ##Returns updated value
   } 
   
   beta_new_cop=list()
@@ -674,16 +696,17 @@ newton_raphson_iteration=function(results,input_par,phi=1,verbose=c(FALSE,FALSE)
   ####For gamlss parameters####
   for (i in 1:ncol(results$margin_d)) {
   
-    if (i==1) {dlcopdpar_final=dlcopdpar[[i]]} ###
-    else if (i==length(results$derivatives_calculated_all_margins)) {
-      dlcopdpar_final=c(dlcopdpar_final,dlcopdpar[[i]]+dlcopdpar[[i-1]])
+    if (i==1) {dlcopdpar_final=dlcopdpar[[i]]*results$margin_d[,i]} ###*results$margin_d[,i]
+    else if (i==ncol(results$margin_d)) {
+      dlcopdpar_final=c(dlcopdpar_final,dlcopdpar[[i-1]]*results$margin_d[,i]) #*results$margin_d[,i]
     } 
     else {
-      dlcopdpar_final=c(dlcopdpar_final,dlcopdpar[[i-1]])
+      dlcopdpar_final=c(dlcopdpar_final,(dlcopdpar[[i]]+dlcopdpar[[i-1]])*results$margin_d[,i])#*results$margin_d[,i]
     }
   }
   
   dlcopdpar_final=cbind(dlcopdpar_final,dlcopdpar_final,dlcopdpar_final,dlcopdpar_final)
+  response_final=cbind(results$response,results$response,results$response,results$response)
   
   for (i in 1:length(results$derivatives_calculated_all_margins)) {
     
@@ -693,7 +716,7 @@ newton_raphson_iteration=function(results,input_par,phi=1,verbose=c(FALSE,FALSE)
     
   }
   
-  margin_score=score_function(eta=results$eta_nomargin[[1]][,c("mu","sigma","nu","tau")],dldpar=dldpar,dpardeta=dpardeta,dlcopdpar=dlcopdpar_final,phi=phi,verbose=verbose[1]) ##Returns updated value
+  margin_score=score_function(eta=results$eta_nomargin[[1]][,c("mu","sigma","nu","tau")],dldpar=dldpar,dpardeta=dpardeta,dlcopdpar=dlcopdpar_final,response=response_final,phi=phi,step_size=step_size,verbose=verbose[1]) ##Returns updated value
   
   
   parameter_names=c("mu","sigma","nu","tau")
@@ -744,16 +767,23 @@ newton_raphson_iteration=function(results,input_par,phi=1,verbose=c(FALSE,FALSE)
 
 #Starting parameters for iterations
 start_par<-extract_parameters_from_fitted(fitted_margins,fitted_copulas,copula_link)
-first_input_par=start_par ####
+first_input_par=start_par*(1+.1*(runif(length(start_par))-0.5))####
 
 #Newton Raphson iterations
+####BENCHMARK IS 12,874.8971 
 end_par_matrix=matrix(0,ncol=length(start_par),nrow=0)
+end_loglik_matrix=matrix(0,ncol=1,nrow=0)
 
 first_run=TRUE
 change=1
 run_counter=1
-while (abs(change) > .05 ) {
-  if(!first_run) {start_log_lik=results$log_lik_results} else {input_par=first_input_par}
+phi=1
+step_adjustment=0.5
+step_size=1
+verbose_option=c(FALSE,FALSE)
+while ((abs(change) > .1*phi | run_counter <= 10) & run_counter <= 100) {
+  if(!first_run) {start_log_lik=results$log_lik_results} else {input_par=first_input_par; phi_inner=phi}
+
   #print(input_par)
   results= calc_joint_likelihood(input_par =input_par  #optim_results$par
                                ,start_fitted_margins = fitted_margins
@@ -767,24 +797,25 @@ while (abs(change) > .05 ) {
                                , copula_link=copula_link
                                , return_option="list"
                                , dataset=dataset
-                               ,verbose=TRUE
+                               , verbose=FALSE
                                 )
 
   end_log_lik=results$log_lik_results
 
   if(first_run) {change=1} else {
     change=end_log_lik["Total"]-start_log_lik["Total"]
-    log_lik_output=c(start_log_lik["Total"],end_log_lik["Total"],change)
-    names(log_lik_output) = c("Start LogLik","End LogLik","Change")
+    log_lik_output=c(start_log_lik["Total"],end_log_lik["Total"],change,phi_inner)
+    names(log_lik_output) = c("Start LogLik","End LogLik","Change","phi")
     print(log_lik_output)
   }
   
-  iteration_out=newton_raphson_iteration(results,input_par,phi=.5,verbose=c(TRUE,TRUE))
+  iteration_out=newton_raphson_iteration(results,input_par,phi=phi_inner,step_size=step_size,verbose=verbose_option)
   cbind(iteration_out[[1]],iteration_out[[2]])
   end_par=iteration_out[[2]]
   input_par=end_par
   first_run=FALSE
   end_par_matrix=rbind(end_par_matrix,end_par)
+  end_loglik_matrix=rbind(end_loglik_matrix,end_log_lik[["Total"]])
   run_counter=run_counter+1
   #Showing charts
   colnames(end_par_matrix)=names(end_par)
@@ -793,7 +824,20 @@ while (abs(change) > .05 ) {
   for (par_name in colnames(end_par_matrix)) {
     plot(1:nrow(end_par_matrix),end_par_matrix[,par_name],main=par_name)    
   }
+  plot(1:nrow(end_par_matrix),end_loglik_matrix[,1],main="loglik")
+  if(length(end_loglik_matrix)>5) {
+    if(all(end_loglik_matrix[(length(end_loglik_matrix)-3):(length(end_loglik_matrix)-1)]-end_loglik_matrix[(length(end_loglik_matrix)-2):length(end_loglik_matrix)]>0)){break}
+  }
+
+  phi_inner=phi*(step_adjustment^min(2,run_counter-1))
 }
+
+
+cbind(end_par)
+
+results$log_lik_results
+
+results$derivatives_calculated_all_margins[[1]]
 
 ####TESTING dpardeta for copula =1
 
@@ -805,6 +849,8 @@ c(mean(copula_link$theta.linkinv(end_par_matrix[,"theta 1,2"]))
 new_versus_original=cbind(start_par,end_par_matrix[nrow(end_par_matrix),])
 colnames(new_versus_original)=c("Gamlss+VineCop","Manual")
 print(new_versus_original)
+
+results$log_lik_results
 
 #### Exploratory ####
 
@@ -819,7 +865,6 @@ fitted_margins<-fit_margins(mu.formula=formula(response~age),dataset=dataset[dat
 fitted_copulas<-fit_copulas(fitted_margins,copula_dist="t",method="vine")
 summary(fitted_copulas)
 contour(fitted_copulas)
-
 
 
 
