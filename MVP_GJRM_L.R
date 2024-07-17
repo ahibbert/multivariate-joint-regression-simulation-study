@@ -160,7 +160,7 @@ dlog_2plus <- function(x) {
   return(1/(x-2))
 }
 
-calc_joint_likelihood <- function(input_par,start_fitted_margins,margin_dist,copula_dist,return_option="list",copula_link,dataset,mm_cop,verbose=TRUE,calc_d2=FALSE,dFUN=dZISICHEL,pFUN=pZISICHEL)  {
+calc_joint_likelihood <- function(input_par,mm_mar,margin_dist,copula_dist,return_option="list",copula_link,dataset,mm_cop,verbose=TRUE,calc_d2=FALSE,dFUN=dZISICHEL,pFUN=pZISICHEL)  {
   
   #return_option="list";start_fitted_margins=fitted_margins;input_par=start_par;copula_dist="t";margin_dist = ZISICHEL(mu.link = "log",sigma.link = "log",nu.link = "identity",tau.link = "logit");verbose=TRUE;dFUN=dZISICHEL;pFUN=pZISICHEL;calc_d2=FALSE
     
@@ -173,7 +173,7 @@ calc_joint_likelihood <- function(input_par,start_fitted_margins,margin_dist,cop
       
       #### Get linear predictors and their linked value -> **Creates eta, eta_link_inv** ####
       eta = eta_linkinv = list()
-      length_fitted_margins=length(start_fitted_margins)
+      length_fitted_margins=length(mm_mar)
       margin_names=unique(dataset$time)
       num_margins = length(margin_names)
       observation_count = nrow(dataset[dataset$time==margin_names[1],])
@@ -196,7 +196,7 @@ calc_joint_likelihood <- function(input_par,start_fitted_margins,margin_dist,cop
         for (parameter in c("mu", "sigma", "nu", "tau")) {
           par_temp <- input_par[grepl(paste(parameter,margin_number,sep="."), names(input_par))]
           
-          mm=model.matrix(start_fitted_margins[[margin_number]], what = parameter)
+          mm=mm_mar[[margin_number]][[parameter]]
           mm_all[[margin_number]][[parameter]]=mm
           
           model_matrices[, parameter] = rowSums(mm * matrix(rep(par_temp,each=nrow(mm)),ncol=length(par_temp),dimnames=list(NULL,c(names(par_temp))))) #These are the linear predictors
@@ -483,7 +483,7 @@ print(log_lik_list)
 
 #### 4. Log likelihood calculation + optimisation with optim ####
 
-#####TEMPORARY UNTIL WE FEED COP MM THROUGH RESULTS LIST
+#####Setting up Copula model matrix
 mm_cop=list()
 for (i in 1:length(copula_score)){
   mm_cop[[i]]=list()
@@ -493,85 +493,43 @@ for (i in 1:length(copula_score)){
   colnames(mm_cop[[i]]$zeta)=c("(Intercept)","gender")
 }
 
-results= calc_joint_likelihood(input_par =start_par
-                      ,start_fitted_margins = fitted_margins
-                      ,margin_dist = ZISICHEL(
-                        mu.link = "log",
-                        sigma.link = "log",
-                        nu.link = "identity",
-                        tau.link = "logit"
-                      )
-                      , copula_dist="t"
-                      , copula_link=copula_link
-                      ,mm_cop = mm_cop
-                      , return_option="list"
-                      , dataset=dataset
-                      )
+#Setting up margin model matrix
+mm_mar=list()
+mm_mar[[1]]=list()
+for (parameter in c("mu","sigma","nu","tau")) {
+  print(head(model.matrix(fitted_margins[[1]],what=parameter)))
+  mm_mar[[1]][[parameter]]= model.matrix(fitted_margins[[1]],what=parameter)
+  print(head(mm_mar[[1]][[parameter]]))
+}
 
-observation_count=nrow(dataset[dataset$time==1,])
-df=length(start_par)+start_par["zeta 1,2"]+start_par["zeta 2,3"]-2
-results_df=c(results$log_lik_results,-results$log_lik_results["Total"]*2+2*df,-results$log_lik_results["Total"]*2+log(observation_count*num_margins)*df) #AIC= 26,004 | 
-names(results_df)=c(names(results_df[1:(length(results_df)-3)]),"LogLik","AIC","BIC")
-print(results_df)
+#Starting parameters for iterations
+start_par<-extract_parameters_from_fitted(fitted_margins,fitted_copulas,copula_link)
 
-optim_results=optim(start_par
-      ,calc_joint_likelihood
-      ,start_fitted_margins = fitted_margins
-      ,margin_dist = ZISICHEL(
-        mu.link = "log",
-        sigma.link = "log",
-        nu.link = "identity",
-        tau.link = "logit"
-      )
-      , copula_dist="t"
-      , copula_link=copula_link
-      , dataset=dataset
-      , return_option="log_lik"
-      , control=list(fnscale=-1,trace=3)
-      , hessian=TRUE
-      )
+###TEMPORARY FOR JUST ONE ADDITIONAL PARAMETER TO EACH COPULA
+start_par=c(start_par,0,0,0,0)
+theta_par_loc=grepl("theta",names(start_par))|grepl("zeta",names(start_par))
+names(start_par)[(length(start_par)-3):length(start_par)]=paste(names(c(start_par[theta_par_loc])),".gender",sep="")
+names(start_par)[theta_par_loc]=paste(names(c(start_par[theta_par_loc])),".(Intercept)",sep="")
+start_par
 
-library(numDeriv)
-grad_l<-grad(calc_joint_likelihood,
-              , x=start_par
-             ,method = "simple"
-               ,start_fitted_margins = fitted_margins
-               ,margin_dist = ZISICHEL(
-                 mu.link = "log",
-                 sigma.link = "log",
-                 nu.link = "identity",
-                 tau.link = "logit"
-               )
-               , copula_dist="t"
-             , copula_link=copula_link
-               , return_option="log_lik"
-             ,dataset=dataset
+#Test calc_joint_likelihood
+results= calc_joint_likelihood(input_par =start_par  #optim_results$par
+                               ,mm_mar= mm_mar
+                               ,margin_dist = ZISICHEL(
+                                 mu.link = "log",
+                                 sigma.link = "log",
+                                 nu.link = "identity",
+                                 tau.link = "logit"
+                               )
+                               , copula_dist="t"
+                               , copula_link=copula_link
+                               , mm_cop = mm_cop
+                               , return_option="list"
+                               , dataset=dataset
+                               , verbose=FALSE
 )
-grad_l
 
-hessian_l<-hessian(calc_joint_likelihood,
-             , x=input_par
-             ,start_fitted_margins = fitted_margins
-             ,margin_dist = ZISICHEL(
-               mu.link = "log",
-               sigma.link = "log",
-               nu.link = "identity",
-               tau.link = "logit"
-             )
-             , copula_dist="t"
-             , copula_link=copula_link
-             , return_option="log_lik"
-             ,dataset=dataset
-)
-hessian_l
-
-
-########LATER
-new_SE=sqrt(diag(solve(-hessian_l)))
-old_SE=sqrt(diag(vcov(fitted_margins[[1]])))
-old_SE=c(old_SE,c(fitted_copulas$`1,2`$se,fitted_copulas$`2,3`$se, fitted_copulas$`1,2`$se2,fitted_copulas$`2,3`$se2))
-SEs=cbind(start_par,old_SE,end_par,new_SE)
-SEs
+results$log_lik_results
 
 #### Extract parameters and SE from separate and jointly optimised datasets -> all_out_combined ####
 library("MASS")
@@ -788,16 +746,6 @@ newton_raphson_iteration=function(results,input_par,phi=1,step_size=1,verbose=c(
 }
 
 ########WORKING NEWTON RAPHSON ITERATIONS
-
-#Starting parameters for iterations
-start_par<-extract_parameters_from_fitted(fitted_margins,fitted_copulas,copula_link)
-
-###TEMPORARY FOR JUST ONE ADDITIONAL PARAMETER TO EACH COPULA
-  start_par=c(start_par,0,0,0,0)
-  theta_par_loc=grepl("theta",names(start_par))|grepl("zeta",names(start_par))
-  names(start_par)[(length(start_par)-3):length(start_par)]=paste(names(c(start_par[theta_par_loc])),".gender",sep="")
-  names(start_par)[theta_par_loc]=paste(names(c(start_par[theta_par_loc])),".(Intercept)",sep="")
-  start_par
   
 #first_input_par=start_par*(1+.1*(runif(length(start_par))-0.5))####
 first_input_par=start_par
@@ -819,7 +767,7 @@ while ((abs(change) > .1*phi | run_counter <= 10) & run_counter <= 100) {
 
   #print(input_par)
   results= calc_joint_likelihood(input_par =input_par  #optim_results$par
-                               ,start_fitted_margins = fitted_margins
+                               ,mm_mar = mm_mar
                                ,margin_dist = ZISICHEL(
                                  mu.link = "log",
                                  sigma.link = "log",
@@ -874,6 +822,89 @@ colnames(new_versus_original)=c("Gamlss+VineCop","Manual")
 print(new_versus_original)
 
 results$log_lik_results
+
+
+#### Manual gradient and hessian matrix
+\
+
+results= calc_joint_likelihood(input_par =start_par
+                               ,start_fitted_margins = fitted_margins
+                               ,margin_dist = ZISICHEL(
+                                 mu.link = "log",
+                                 sigma.link = "log",
+                                 nu.link = "identity",
+                                 tau.link = "logit"
+                               )
+                               , copula_dist="t"
+                               , copula_link=copula_link
+                               ,mm_cop = mm_cop
+                               , return_option="list"
+                               , dataset=dataset
+)
+
+observation_count=nrow(dataset[dataset$time==1,])
+df=length(start_par)+start_par["zeta 1,2"]+start_par["zeta 2,3"]-2
+results_df=c(results$log_lik_results,-results$log_lik_results["Total"]*2+2*df,-results$log_lik_results["Total"]*2+log(observation_count*num_margins)*df) #AIC= 26,004 | 
+names(results_df)=c(names(results_df[1:(length(results_df)-3)]),"LogLik","AIC","BIC")
+print(results_df)
+
+optim_results=optim(start_par
+                    ,calc_joint_likelihood
+                    ,start_fitted_margins = fitted_margins
+                    ,margin_dist = ZISICHEL(
+                      mu.link = "log",
+                      sigma.link = "log",
+                      nu.link = "identity",
+                      tau.link = "logit"
+                    )
+                    , copula_dist="t"
+                    , copula_link=copula_link
+                    , dataset=dataset
+                    , return_option="log_lik"
+                    , control=list(fnscale=-1,trace=3)
+                    , hessian=TRUE
+)
+
+library(numDeriv)
+grad_l<-grad(calc_joint_likelihood,
+             , x=start_par
+             ,method = "simple"
+             ,start_fitted_margins = fitted_margins
+             ,margin_dist = ZISICHEL(
+               mu.link = "log",
+               sigma.link = "log",
+               nu.link = "identity",
+               tau.link = "logit"
+             )
+             , copula_dist="t"
+             , copula_link=copula_link
+             , return_option="log_lik"
+             ,dataset=dataset
+)
+grad_l
+
+hessian_l<-hessian(calc_joint_likelihood,
+                   , x=input_par
+                   ,start_fitted_margins = fitted_margins
+                   ,margin_dist = ZISICHEL(
+                     mu.link = "log",
+                     sigma.link = "log",
+                     nu.link = "identity",
+                     tau.link = "logit"
+                   )
+                   , copula_dist="t"
+                   , copula_link=copula_link
+                   , return_option="log_lik"
+                   ,dataset=dataset
+)
+hessian_l
+
+########LATER
+new_SE=sqrt(diag(solve(-hessian_l)))
+old_SE=sqrt(diag(vcov(fitted_margins[[1]])))
+old_SE=c(old_SE,c(fitted_copulas$`1,2`$se,fitted_copulas$`2,3`$se, fitted_copulas$`1,2`$se2,fitted_copulas$`2,3`$se2))
+SEs=cbind(start_par,old_SE,end_par,new_SE)
+SEs
 
 #### Exploratory ####
 
