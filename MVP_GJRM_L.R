@@ -596,8 +596,8 @@ mu.formula = formula("response ~ as.factor(time)+as.factor(gender)+age")
 sigma.formula = formula("~ as.factor(time)+age")
 nu.formula = formula("~ as.factor(time)+as.factor(gender)")
 tau.formula = formula("~ age")
-theta.formula=formula("~time")
-zeta.formula=formula("~time")
+theta.formula=formula("response~as.factor(time)+as.factor(gender) + time*gender")
+zeta.formula=formula("response~as.factor(time)+as.factor(gender) + time*gender")
 
 #Link functions and distributions
 margin_dist = ZISICHEL(
@@ -640,7 +640,8 @@ fitted_copulas[[1]]=copula_model
 start_par<-extract_parameters_from_fitted(fitted_margins,fitted_copulas=fitted_copulas,copula_link)
 
 #Generate the copula model matrix
-generate_cop_model_matrix = function(dataset,formula=formula(~1),zeta.formula=formula(~1),time) {
+generate_cop_model_matrix = function(dataset,theta.formula=formula(~1),zeta.formula=formula(~1),time) {
+  #time="time"
   margins=unique(dataset[,time])
   num_copulas=length(margins)-1
   first=TRUE
@@ -655,17 +656,24 @@ generate_cop_model_matrix = function(dataset,formula=formula(~1),zeta.formula=fo
       cop_data_matrix=rbind(cop_data_matrix,add_to_cop_data_matrix)
     } 
   }
-  matrix_of_ones=matrix(1,nrow=nrow(cop_data_matrix),ncol=1)
-  colnames(matrix_of_ones)="(Intercept)"
+  #matrix_of_ones=matrix(1,nrow=nrow(cop_data_matrix),ncol=1)
+  #colnames(matrix_of_ones)="(Intercept)"
   cop_model_matrix=list()
-  cop_model_matrix[["theta"]]=cbind(matrix_of_ones,model.frame(formula,data=cop_data_matrix))
-  cop_model_matrix[["zeta"]]=cbind(matrix_of_ones,model.frame(zeta.formula,data=cop_data_matrix))
+  #cop_model_matrix[["theta"]]=cbind(matrix_of_ones,model.frame(formula,data=cop_data_matrix))
+  #cop_model_matrix[["zeta"]]=cbind(matrix_of_ones,model.frame(zeta.formula,data=cop_data_matrix))
+  cop_model_matrix[["theta"]]=model.matrix(theta.formula,data=cop_data_matrix,contrasts.arg = sapply(cop_data_matrix,is.factor))
+  cop_model_matrix[["zeta"]]=model.matrix(zeta.formula,data=cop_data_matrix)
   
   return_list=(cop_model_matrix)
   #names(return_list)=("cop_model_matrix")
   return(return_list)
 }
-mm_cop=generate_cop_model_matrix(dataset=dataset,formula=theta.formula,zeta.formula=zeta.formula,time="time")
+#mm_cop=generate_cop_model_matrix(dataset=dataset,formula=theta.formula,zeta.formula=zeta.formula,time="time")
+
+#hacky model matrix
+mm_cop=list()
+mm_cop[["theta"]]=model.matrix(gamlss(formula=theta.formula,data=(dataset[dataset$time %in% unique(dataset$time)[1:(length(unique(dataset$time))-1)],])))
+mm_cop[["zeta"]]=model.matrix(gamlss(formula=zeta.formula,data=(dataset[dataset$time %in% unique(dataset$time)[1:(length(unique(dataset$time))-1)],])))
 
 #Create parameter vector from model matrix for copulas
 temp_cop_parameter_names=c()
@@ -686,7 +694,7 @@ temp_cop_start_par[grepl("Intercept",names(temp_cop_start_par))&grepl("zeta",nam
 start_par=c(start_par[!(theta_par_loc | zeta_par_loc)],temp_cop_start_par)
 
 #Starting joint likelihood
-results= calc_joint_likelihood(input_par =start_par  #optim_results$par
+results_start= calc_joint_likelihood(input_par =start_par  #optim_results$par
                                , mm_mar= mm_mar
                                , margin_dist = margin_dist
                                , copula_dist=copula_dist
@@ -756,7 +764,7 @@ while ((abs(change) > .1*phi | run_counter <= 100) & run_counter <= 100) {
   run_counter=run_counter+1
   #Showing charts
   colnames(end_par_matrix)=names(end_par)
-  pars=round(sqrt(ncol(end_par_matrix)),0)+1
+  pars=round(sqrt(ncol(end_par_matrix)+1),0)
   plot.new();par(mfrow=c(pars,pars))
   for (par_name in colnames(end_par_matrix)) {
     plot(1:nrow(end_par_matrix),end_par_matrix[,par_name],main=par_name)    
@@ -769,10 +777,13 @@ while ((abs(change) > .1*phi | run_counter <= 100) & run_counter <= 100) {
   phi_inner=phi*(step_adjustment^min(2,run_counter-1))
 }
 
+#### Results ####
+print("Separate likelihood")
+print(results_start$log_lik_results)
+print("Joint likelihood")
+print(results$log_lik_results)
 
-results$log_lik_results
-
-new_versus_original=cbind(start_par,end_par_matrix[nrow(end_par_matrix),])
+new_versus_original=cbind(results_start$start_par,end_par_matrix[nrow(end_par_matrix),])
 colnames(new_versus_original)=c("Gamlss+VineCop","Manual")
 print(new_versus_original)
 
