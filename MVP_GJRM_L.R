@@ -705,7 +705,7 @@ results_start= calc_joint_likelihood(input_par =start_par  #optim_results$par
                                , verbose=FALSE
 )
 
-print(results$log_lik_results)
+print(results_start$log_lik_results)
 
 #### Newton Raphson optimisation ####
 
