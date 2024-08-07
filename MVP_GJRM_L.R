@@ -218,19 +218,15 @@ calc_joint_likelihood <- function(input_par,mm_mar,margin_dist,copula_dist,retur
       #### MARGINAL MODEL: Get linear predictors and their inverse -> **Creates eta, eta_link_inv** from **mm_mar** ####
       margin_names=unique(dataset$time)
       num_margins = length(margin_names)
-      #observation_count = nrow(dataset[dataset$time==margin_names[1],])
       response=dataset$response
       margin_parameters=names(mm_mar)
-        
-      #mm_all=list()  
+      
       eta = eta_linkinv = matrix(nrow = nrow(dataset), ncol = length(margin_parameters))
-
       colnames(eta)=colnames(eta_linkinv)= margin_parameters
         
       for (parameter in margin_parameters) {
         par_temp <- input_par[grepl(paste(parameter,sep="."), names(input_par))]
         mm=mm_mar[[parameter]]
-        #mm_all[[parameter]]=mm
         eta[, parameter] = rowSums(mm * matrix(rep(par_temp,each=nrow(mm)),ncol=length(par_temp),dimnames=list(NULL,c(names(par_temp))))) #These are the linear predictors
         FUN=margin_dist[[names(margin_dist)[grepl(paste(parameter,"linkinv",sep="."),names(margin_dist))]]]
         eta_linkinv[, parameter]=FUN(eta[,parameter])
@@ -238,19 +234,9 @@ calc_joint_likelihood <- function(input_par,mm_mar,margin_dist,copula_dist,retur
       
       #### MARGINAL MODEL: Get density and probability functions for margins -> ** Creates margin_p and margin_d ####
       
-      margin_d = dFUN(x =   response
-                                             ,mu=    eta_linkinv[,"mu"]
-                                             ,sigma= eta_linkinv[,"sigma"]
-                                             ,nu=    eta_linkinv[,"nu"]
-                                             ,tau=   eta_linkinv[,"tau"])
+      margin_p = pFUN(    response ,mu=eta_linkinv[,"mu"] ,sigma=eta_linkinv[,"sigma"] ,nu=eta_linkinv[,"nu"],tau=   eta_linkinv[,"tau"])
+      margin_d = dFUN(x = response ,mu=eta_linkinv[,"mu"] ,sigma=eta_linkinv[,"sigma"] ,nu=eta_linkinv[,"nu"],tau=   eta_linkinv[,"tau"])
         
-      margin_p = pFUN(      response
-                                             ,mu=    eta_linkinv[,"mu"]
-                                             ,sigma= eta_linkinv[,"sigma"]
-                                             ,nu=    eta_linkinv[,"nu"]
-                                             ,tau=   eta_linkinv[,"tau"])
-        
-      
       #### Get density of the copula function for each pair of margins ####
       
       #margin_names; num_margins; margin_parameters
@@ -417,9 +403,9 @@ score_function <- function(eta,dldpar,dpardeta,dlcopdpar,response,phi=1,step_siz
     return(return_list)
   }
   
-newton_raphson_iteration=function(results,input_par,phi=1,step_size=1,verbose=c(FALSE,FALSE)) {
+newton_raphson_iteration=function(results,input_par,phi=1,step_size=1,verbose=c(FALSE,FALSE),calc_d2=FALSE) {
     
-    #results=results;input_par=start_par;verbose=c(TRUE,TRUE)
+    #results=results;input_par=start_par;verbose=c(TRUE,TRUE); calc_d2=TRUE
     
     steps_all=list()
     par_out=list()
@@ -449,7 +435,9 @@ newton_raphson_iteration=function(results,input_par,phi=1,step_size=1,verbose=c(
     
     beta_new_cop=list()
     #parameter_names=c("theta","zeta")
-    parameter_names=c("theta","zeta")
+    cop_parameter_names=c("theta","zeta")
+    
+    hess_list=list()
     
     e_k=copula_score$z_k  
     beta_new_cop=list()
@@ -458,9 +446,12 @@ newton_raphson_iteration=function(results,input_par,phi=1,step_size=1,verbose=c(
       X=as.matrix(mm)
       W=diag(copula_score$w_k[,j])
       e_k_par=e_k[,j]
-      beta_new_cop[[parameter_names[j]]]=solve(t(X)%*%W%*%X)%*%t(X)%*%W%*%e_k_par
-      rownames(beta_new_cop[[parameter_names[j]]])= paste(paste(parameter_names[j],sep=" "),colnames(mm),sep=".")
+      beta_new_cop[[cop_parameter_names[j]]]=solve(t(X)%*%W%*%X)%*%t(X)%*%W%*%e_k_par
+      rownames(beta_new_cop[[cop_parameter_names[j]]])= paste(paste(cop_parameter_names[j],sep=" "),colnames(mm),sep=".")
       #names(beta_new_cop[[j]])= paste(parameter_names[j],margin_number,rownames(beta_new_cop[[j]]),sep=".")
+      if (calc_d2 == TRUE) {
+        hess_list[[(cop_parameter_names[j])]]=-t(X)%*%W%*%X
+      }
     }
     
     one=cbind(dataset[dataset$time %in% unique(dataset$time)[1:(length(unique(dataset$time))-1)],c("time","subject")],dlcopdpar)
@@ -509,6 +500,9 @@ newton_raphson_iteration=function(results,input_par,phi=1,step_size=1,verbose=c(
       e_k_par=e_k[,which(margin_parameters==parameter)]
       beta_r[[parameter]]=solve(t(X)%*%W%*%X)%*%t(X)%*%W%*%e_k_par
       rownames(beta_r[[parameter]])= paste(parameter,rownames(beta_r[[parameter]]),sep=".")
+      if (calc_d2 == TRUE) {
+        hess_list[[parameter]]=-t(X)%*%W%*%X
+      }
     }
     
     beta_new=matrix(ncol=1,nrow=0)
@@ -521,17 +515,34 @@ newton_raphson_iteration=function(results,input_par,phi=1,step_size=1,verbose=c(
       beta_new=rbind(beta_new,beta_new_cop[[parameter]])
     }
     
-    beta_new
-    
     end_par=as.vector(beta_new)
     names(end_par)=rownames(beta_new)
-    
     end_par=end_par[names(start_par)]
     
-    return_list=list(input_par,end_par)
-    names(return_list)=c("input_par","end_par")
+    if (calc_d2==TRUE) {
+      se_par=vector()
+      for (names in c(margin_parameters)) {
+        n=nrow(margin_score$z_k)
+        se_var=(diag(solve(-hess_list[[names]])))
+        #se_var=diag(hess_list[[names]])/n
+        se=sqrt(se_var)#/sqrt(n)
+        se_par=c(se_par,se)
+      }
+      for (names in cop_parameter_names) {
+        n=nrow(copula_score$z_k)
+        se_var=(diag(solve(-hess_list[[names]])))
+        se=sqrt(se_var)#/sqrt(n)
+        se_par=c(se_par,se)
+      }
+      return_list=list(input_par,end_par,se_par)
+      names(return_list)=c("input_par","end_par","se_par")
+    } else {
+      return_list=list(input_par,end_par)
+      names(return_list)=c("input_par","end_par")
+    }
+    
     return(return_list)
-  }
+}
   
 #### 0. Load RAND data subset and transform to standard longitudinal dataset #######
 
@@ -558,8 +569,8 @@ mu.formula = formula("response ~ as.factor(time)+as.factor(gender)+age")
 sigma.formula = formula("~ as.factor(time)+age")
 nu.formula = formula("~ as.factor(time)+as.factor(gender)")
 tau.formula = formula("~ age")
-theta.formula=formula("response~1")
-zeta.formula=formula("response~as.factor(time)+as.factor(gender)")
+theta.formula=formula("response~as.factor(gender)")
+zeta.formula=formula("response~1")
 
 #Link functions and distributions
 margin_dist = ZISICHEL(
@@ -682,7 +693,7 @@ step_adjustment=0.5^0.5
 step_size=1
 verbose_option=c(FALSE,FALSE)
 stopifnegative=FALSE
-while ((abs(change) > .1*phi) & run_counter <= 100) { #| run_counter <= 100
+while ((abs(change) > .05*phi| run_counter <= 100) & run_counter <= 100) { #
   if(!first_run) {start_log_lik=results$log_lik_results} else {input_par=first_input_par; phi_inner=phi}
 
   #print(input_par)
@@ -742,10 +753,6 @@ print(results_start$log_lik_results)
 print("Joint likelihood")
 print(results$log_lik_results)
 
-new_versus_original=cbind(results_start$start_par,end_par_matrix[nrow(end_par_matrix),])
-colnames(new_versus_original)=c("Gamlss+VineCop","Manual")
-print(new_versus_original)
-
 ###############
 
 final_results= calc_joint_likelihood(input_par =end_par  #optim_results$par
@@ -764,6 +771,27 @@ final_results= calc_joint_likelihood(input_par =end_par  #optim_results$par
                                , verbose=FALSE
                                , calc_d2=TRUE
 )
+
+
+final_iteration_out=newton_raphson_iteration(final_results,end_par,phi=phi_inner,step_size=step_size,verbose=verbose_option,calc_d2=TRUE)
+
+new_SE=final_iteration_out$se_par
+old_SE=sqrt(diag(vcov(fitted_margins[[1]])))
+old_SE=c(old_SE,c(fitted_copulas$`1,2`$se,fitted_copulas$`2,3`$se, fitted_copulas$`1,2`$se2,fitted_copulas$`2,3`$se2))
+
+z_score_old=(start_par[0:length(old_SE)]-0)/old_SE
+z_score_new=(end_par-0)/new_SE
+SEs=cbind(start_par,old_SE,z_score_old,end_par,new_SE,z_score_new)
+print(round(SEs,3))
+
+
+
+
+
+
+
+
+
 
 
 
