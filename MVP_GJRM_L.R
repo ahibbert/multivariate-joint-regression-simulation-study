@@ -201,7 +201,7 @@ dlogit <- function(x) {
 }
 
 dlog_2plus <- function(x) {
-  return(1/(x-2))
+  return(-1/(x-2))
 }
 
 calc_joint_likelihood <- function(input_par,mm_mar,margin_dist,copula_dist,return_option="list",copula_link,dataset,mm_cop,verbose=TRUE,calc_d2=FALSE,dFUN=dZISICHEL,pFUN=pZISICHEL)  {
@@ -421,63 +421,25 @@ newton_raphson_iteration=function(results,input_par,phi=1,step_size=1,verbose=c(
     
     #results=results;input_par=start_par;verbose=c(TRUE,TRUE)
     
+    steps_all=list()
+    par_out=list()
     margin_dist=results$margin_dist
     copula_dist=results$copula_dist
     
-    steps_all=list()
-    par_out=list()
+    ### Extract COPULA DERIVATIVES from results list (from calc_joint_likelihood)
     
-    ####For copula parameters####
-    copula_score=list()
     dlcopdpar=list()
-    #for (i in 1:ncol(results$derivatives_copula$dldth)) {
     dldth=results$derivatives_copula$dldth
     dldz=results$derivatives_copula$dldz
-    #d2ldth=results$d2ldth[,i] ########THESE ARE NOT LOG LIKELIHOOD FUNCTIONS they are f''(x)
-    #d2ldz=results$d2ldz[,i]
     dthdeta=results$derivatives_copula$dthdeta
     dzdeta=results$derivatives_copula$dzdeta
     dcdu1=results$derivatives_copula$dcdu1
     dcdu2=results$derivatives_copula$dcdu2
-    
-    #theta_par_temp=start_par[names(start_par)[grepl(paste(i,i+1,sep=","),names(start_par))]]
     
     dldpar=cbind(dldth,dldz)
     #d2ldpar=cbind(d2ldth,d2ldz)
     dpardeta=cbind(dthdeta,dzdeta)
     #dpardeta=dldpar*0+1 ##########Temporary step
-    
-    dlcopdpar=(dcdu1+dcdu2)/(results$copula_d) #+ (dcdu2)/results$copula_d[,i]  #*(results$margin_d[,i]*results$margin_d[,i+1])
-    
-    eta_input=cbind(results$eta_cop[,"theta"],results$eta_cop[,"zeta"])
-    colnames(eta_input)=names(results$eta_cop)
-    copula_score=score_function(eta=eta_input,dldpar=dldpar,dpardeta=dpardeta,dlcopdpar=dldpar*0,response=dldpar*0,phi=phi,step_size=step_size,verbose=verbose[2]) ##Returns updated value
-    #} 
-    margin_dist=results$margin_dist
-    copula_dist=results$copula_dist
-    
-    steps_all=list()
-    par_out=list()
-    
-    ####For copula parameters####
-    copula_score=list()
-    dlcopdpar=list()
-    #for (i in 1:ncol(results$derivatives_copula$dldth)) {
-    dldth=results$derivatives_copula$dldth
-    dldz=results$derivatives_copula$dldz
-    #d2ldth=results$d2ldth[,i] ########THESE ARE NOT LOG LIKELIHOOD FUNCTIONS they are f''(x)
-    #d2ldz=results$d2ldz[,i]
-    dthdeta=results$derivatives_copula$dthdeta
-    dzdeta=results$derivatives_copula$dzdeta
-    dcdu1=results$derivatives_copula$dcdu1
-    dcdu2=results$derivatives_copula$dcdu2
-    
-    #theta_par_temp=start_par[names(start_par)[grepl(paste(i,i+1,sep=","),names(start_par))]]
-    
-    dldpar=cbind(dldth,dldz)
-    #d2ldpar=cbind(d2ldth,d2ldz)
-    dpardeta=cbind(dthdeta,dzdeta)
-    dpardeta=dldpar*0+1 ##########Temporary step
     
     dlcopdpar=(dcdu1+dcdu2)/(results$copula_d) #+ (dcdu2)/results$copula_d[,i]  #*(results$margin_d[,i]*results$margin_d[,i+1])
     
@@ -596,8 +558,8 @@ mu.formula = formula("response ~ as.factor(time)+as.factor(gender)+age")
 sigma.formula = formula("~ as.factor(time)+age")
 nu.formula = formula("~ as.factor(time)+as.factor(gender)")
 tau.formula = formula("~ age")
-theta.formula=formula("response~as.factor(time)+as.factor(gender) + time*gender")
-zeta.formula=formula("response~as.factor(time)+as.factor(gender) + time*gender")
+theta.formula=formula("response~1")
+zeta.formula=formula("response~as.factor(time)+as.factor(gender)")
 
 #Link functions and distributions
 margin_dist = ZISICHEL(
@@ -709,23 +671,18 @@ print(results_start$log_lik_results)
 
 #### Newton Raphson optimisation ####
 
-#Inputs: Functions and parameters
 first_input_par=start_par
-#first_input_par=start_par*(1+.1*(runif(length(start_par))-0.5))
-
-#Newton Raphson iterations
-
 end_par_matrix=matrix(0,ncol=length(start_par),nrow=0)
 end_loglik_matrix=matrix(0,ncol=1,nrow=0)
-
 first_run=TRUE
 change=1
 run_counter=1
 phi=1
-step_adjustment=0.5
+step_adjustment=0.5^0.5
 step_size=1
 verbose_option=c(FALSE,FALSE)
-while ((abs(change) > .1*phi | run_counter <= 100) & run_counter <= 100) {
+stopifnegative=FALSE
+while ((abs(change) > .1*phi) & run_counter <= 100) { #| run_counter <= 100
   if(!first_run) {start_log_lik=results$log_lik_results} else {input_par=first_input_par; phi_inner=phi}
 
   #print(input_par)
@@ -765,19 +722,21 @@ while ((abs(change) > .1*phi | run_counter <= 100) & run_counter <= 100) {
   #Showing charts
   colnames(end_par_matrix)=names(end_par)
   pars=round(sqrt(ncol(end_par_matrix)+1),0)
-  plot.new();par(mfrow=c(pars,pars))
+  plot.new();par(mfrow=c(pars,pars+1))
   for (par_name in colnames(end_par_matrix)) {
     plot(1:nrow(end_par_matrix),end_par_matrix[,par_name],main=par_name)    
   }
   plot(1:nrow(end_par_matrix),end_loglik_matrix[,1],main="loglik")
-  if(length(end_loglik_matrix)>5) {
-    if(all(end_loglik_matrix[(length(end_loglik_matrix)-3):(length(end_loglik_matrix)-1)]-end_loglik_matrix[(length(end_loglik_matrix)-2):length(end_loglik_matrix)]>0)){break}
+  
+  if(stopifnegative==TRUE) {
+    if(length(end_loglik_matrix)>5) {
+      if(all(end_loglik_matrix[(length(end_loglik_matrix)-3):(length(end_loglik_matrix)-1)]-end_loglik_matrix[(length(end_loglik_matrix)-2):length(end_loglik_matrix)]>0)){break}
+    }
   }
 
   phi_inner=phi*(step_adjustment^min(2,run_counter-1))
 }
 
-#### Results ####
 print("Separate likelihood")
 print(results_start$log_lik_results)
 print("Joint likelihood")
@@ -787,8 +746,24 @@ new_versus_original=cbind(results_start$start_par,end_par_matrix[nrow(end_par_ma
 colnames(new_versus_original)=c("Gamlss+VineCop","Manual")
 print(new_versus_original)
 
+###############
 
-
+final_results= calc_joint_likelihood(input_par =end_par  #optim_results$par
+                               ,mm_mar = mm_mar
+                               ,margin_dist = ZISICHEL(
+                                 mu.link = "log",
+                                 sigma.link = "log",
+                                 nu.link = "identity",
+                                 tau.link = "logit"
+                               )
+                               , copula_dist="t"
+                               , copula_link=copula_link
+                               ,mm_cop = mm_cop
+                               , return_option="list"
+                               , dataset=dataset
+                               , verbose=FALSE
+                               , calc_d2=TRUE
+)
 
 
 
