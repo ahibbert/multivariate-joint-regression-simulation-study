@@ -365,7 +365,7 @@ extract_parameters_from_fitted <- function(fitted_margins,fitted_copulas=NA,copu
   return(return_list)
 }
 
-score_function <- function(eta,dldpar,dpardeta,dlcopdpar,response,phi=1,step_size=1,verbose=TRUE) {
+score_function <- function(eta,dldpar,dpardeta,dlcopdpar,d2ldpar,response,phi=1,step_size=1,verbose=TRUE) {
     #u_k
     dlcopdpar=dlcopdpar*((dldpar)*response)
     
@@ -375,7 +375,8 @@ score_function <- function(eta,dldpar,dpardeta,dlcopdpar,response,phi=1,step_siz
     
     #f_k and w_k
     #f_k_quasi_newton=(-(dldpar*dldpar))
-    f_k=-(dldpar^2)
+    f_k=-(d2ldpar)
+    #f_k=(-(dldpar*dldpar))
     
     w_k=-f_k*(dpardeta*dpardeta)
     
@@ -423,18 +424,36 @@ newton_raphson_iteration=function(results,input_par,phi=1,step_size=1,verbose=c(
     dcdu2=results$derivatives_copula$dcdu2
     
     dldpar=cbind(dldth,dldz)
-    #d2ldpar=cbind(d2ldth,d2ldz)
     dpardeta=cbind(dthdeta,dzdeta)
-    #dpardeta=dldpar*0+1 ##########Temporary step
     
     dlcopdpar=(dcdu1+dcdu2)/(results$copula_d) #+ (dcdu2)/results$copula_d[,i]  #*(results$margin_d[,i]*results$margin_d[,i+1])
     
     eta_input=cbind(results$eta_cop[,"theta"],results$eta_cop[,"zeta"])
     colnames(eta_input)=names(results$eta_cop)
-    copula_score=score_function(eta=eta_input,dldpar=dldpar,dpardeta=dpardeta,dlcopdpar=dldpar*0,response=dldpar*0,phi=phi,step_size=step_size,verbose=verbose[2]) ##Returns updated value
+    
+    if(calc_d2 == TRUE) {
+      
+      count=1
+      d2names=names(results$derivatives_copula)[grepl("d2",names(results$derivatives_copula))]
+      for (names in d2names) {
+        if (count==1) {
+          d2cdpar=matrix(results$derivatives_copula[[names]])
+        } else {
+          d2cdpar=cbind(d2cdpar,results$derivatives_copula[[names]])
+        }
+        count=count+1
+      }
+      colnames(d2cdpar)=d2names
+      
+      d2ldpar=(d2cdpar/copula_d)-(dldpar^2)
+      
+    } else {
+      d2ldpar=dldpar^2
+    }
+    
+    copula_score=score_function(eta=eta_input,dldpar=dldpar,dpardeta=dpardeta,dlcopdpar=dldpar*0,d2ldpar=d2ldpar,response=dldpar*0,phi=phi,step_size=step_size,verbose=verbose[2]) ##Returns updated value
     
     beta_new_cop=list()
-    #parameter_names=c("theta","zeta")
     cop_parameter_names=c("theta","zeta")
     
     hess_list=list()
@@ -485,10 +504,15 @@ newton_raphson_iteration=function(results,input_par,phi=1,step_size=1,verbose=c(
     }
     
     dldpar=results$derivatives_calculated_all_margins[,c("dldm","dldd","dldv","dldt")] #First derivative of log likelihood w.r.t. parameters
-    #d2ldpar=results$derivatives_calculated_all_margins[,c("d2ldm2","d2ldd2","d2ldv2","d2ldt2")] #Quasi newton second derivative of log function w.r.t parameters
     dpardeta=results$derivatives_calculated_all_margins[,c("mu.dr","sigma.dr","nu.dr","tau.dr")] #Derivative of inverse link function
     
-    margin_score=score_function(eta=results$eta[,margin_parameters],dldpar=dldpar,dpardeta=dpardeta,dlcopdpar=dlcopdpar_final,response=response_final,phi=phi,step_size=step_size,verbose=verbose[1]) ##Returns updated value
+    if(calc_d2 == TRUE) {
+      d2ldpar=results$derivatives_calculated_all_margins[,c("d2ldm2","d2ldd2","d2ldv2","d2ldt2")]
+    } else {
+      d2ldpar=dldpar^2
+    }
+    
+    margin_score=score_function(eta=results$eta[,margin_parameters],dldpar=dldpar,dpardeta=dpardeta,dlcopdpar=dlcopdpar_final,d2ldpar=d2ldpar, response=response_final,phi=phi,step_size=step_size,verbose=verbose[1]) ##Returns updated value
     
     e_k=margin_score$z_k#-results$eta_nomargin[[1]][,c("mu","sigma","nu","tau")]
     beta_r=list()
@@ -520,6 +544,12 @@ newton_raphson_iteration=function(results,input_par,phi=1,step_size=1,verbose=c(
     end_par=end_par[names(start_par)]
     
     if (calc_d2==TRUE) {
+      
+      
+      cbind(results$derivatives_copula$d2ldth,results$derivatives_copula$d2ldz)
+      
+      
+      
       se_par=vector()
       for (names in c(margin_parameters)) {
         n=nrow(margin_score$z_k)
@@ -565,12 +595,12 @@ plotDist(dataset,"ZISICHEL")
 #### INPUT: Parameters ####
 
 #Formulas
-mu.formula = formula("response ~ as.factor(time)+as.factor(gender)+age")
+mu.formula = formula("response ~ as.factor(time)+as.factor(gender)")
 sigma.formula = formula("~ as.factor(time)+age")
 nu.formula = formula("~ as.factor(time)+as.factor(gender)")
 tau.formula = formula("~ age")
-theta.formula=formula("response~as.factor(gender)")
-zeta.formula=formula("response~1")
+theta.formula=formula("response~as.factor(time)")
+zeta.formula=formula("response~as.factor(time)")
 
 #Link functions and distributions
 margin_dist = ZISICHEL(
@@ -689,11 +719,11 @@ first_run=TRUE
 change=1
 run_counter=1
 phi=1
-step_adjustment=0.5^0.5
+step_adjustment=0.5^(1/2)
 step_size=1
 verbose_option=c(FALSE,FALSE)
 stopifnegative=FALSE
-while ((abs(change) > .05*phi| run_counter <= 100) & run_counter <= 100) { #
+while ((abs(change) > .1*phi*step_adjustment) & run_counter <= 100) { #
   if(!first_run) {start_log_lik=results$log_lik_results} else {input_par=first_input_par; phi_inner=phi}
 
   #print(input_par)
@@ -711,6 +741,7 @@ while ((abs(change) > .05*phi| run_counter <= 100) & run_counter <= 100) { #
                                , return_option="list"
                                , dataset=dataset
                                , verbose=FALSE
+                               ,calc_d2 = TRUE
                                 )
 
   end_log_lik=results$log_lik_results
@@ -722,7 +753,12 @@ while ((abs(change) > .05*phi| run_counter <= 100) & run_counter <= 100) { #
     print(log_lik_output)
   }
   
-  iteration_out=newton_raphson_iteration(results,input_par,phi=phi_inner,step_size=step_size,verbose=verbose_option)
+  iteration_out=newton_raphson_iteration(results
+                                         ,input_par
+                                         ,phi=phi_inner
+                                         ,step_size=step_size
+                                         ,verbose=verbose_option
+                                         ,calc_d2=TRUE)
   cbind(iteration_out[[1]],iteration_out[[2]])
   end_par=iteration_out[[2]]
   input_par=end_par
@@ -735,7 +771,14 @@ while ((abs(change) > .05*phi| run_counter <= 100) & run_counter <= 100) { #
   pars=round(sqrt(ncol(end_par_matrix)+1),0)
   plot.new();par(mfrow=c(pars,pars+1))
   for (par_name in colnames(end_par_matrix)) {
-    plot(1:nrow(end_par_matrix),end_par_matrix[,par_name],main=par_name)    
+    scale_range=0.5
+    if(abs((end_par_matrix[nrow(end_par_matrix),par_name]-start_par[par_name]))>abs(scale_range*start_par[par_name])){
+      plot(1:nrow(end_par_matrix),end_par_matrix[,par_name],main=par_name)            
+    } else {
+      lims=c(start_par[par_name]-abs(start_par[par_name])*scale_range,start_par[par_name]+abs(start_par[par_name])*scale_range)
+      plot(1:nrow(end_par_matrix),end_par_matrix[,par_name],main=par_name,ylim=lims)
+    }
+    
   }
   plot(1:nrow(end_par_matrix),end_loglik_matrix[,1],main="loglik")
   
@@ -781,11 +824,12 @@ old_SE=c(old_SE,c(fitted_copulas$`1,2`$se,fitted_copulas$`2,3`$se, fitted_copula
 
 z_score_old=(start_par[0:length(old_SE)]-0)/old_SE
 z_score_new=(end_par-0)/new_SE
-SEs=cbind(start_par,old_SE,z_score_old,end_par,new_SE,z_score_new)
-print(round(SEs,3))
 
+p_new=pNO(-abs(z_score_new))
+p_old=pNO(-abs(z_score_old))
 
-
+SEs=cbind(start_par,old_SE,p_old,end_par,new_SE,p_new)
+print(round(SEs,5))
 
 
 
