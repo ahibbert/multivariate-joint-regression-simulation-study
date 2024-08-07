@@ -208,6 +208,8 @@ calc_joint_likelihood <- function(input_par,mm_mar,margin_dist,copula_dist,retur
   
   #return_option="list";start_fitted_margins=fitted_margins;input_par=start_par;copula_dist="t";margin_dist = ZISICHEL(mu.link = "log",sigma.link = "log",nu.link = "identity",tau.link = "logit");verbose=TRUE;dFUN=dZISICHEL;pFUN=pZISICHEL;calc_d2=FALSE
     
+  #input_par =input_par;mm_mar = mm_mar;margin_dist = ZISICHEL(mu.link = "log",sigma.link = "log",    nu.link = "identity",    tau.link = "logit"); copula_dist="t"; copula_link=copula_link; mm_cop = mm_cop; return_option="list"; dataset=dataset; verbose=FALSE;calc_d2 = calc_d2
+  
   #tryCatch(
   #  {
       if(return_option=="list" & verbose==TRUE) {
@@ -225,15 +227,15 @@ calc_joint_likelihood <- function(input_par,mm_mar,margin_dist,copula_dist,retur
       colnames(eta)=colnames(eta_linkinv)= margin_parameters
         
       for (parameter in margin_parameters) {
+        #parameter="mu"
         par_temp <- input_par[grepl(paste(parameter,sep="."), names(input_par))]
         mm=mm_mar[[parameter]]
-        eta[, parameter] = rowSums(mm * matrix(rep(par_temp,each=nrow(mm)),ncol=length(par_temp),dimnames=list(NULL,c(names(par_temp))))) #These are the linear predictors
+        eta[, parameter] = rowSums(mm * matrix(rep(par_temp,each=nrow(mm)),ncol=length(par_temp),dimnames=list(NULL,c(names(par_temp)))))
         FUN=margin_dist[[names(margin_dist)[grepl(paste(parameter,"linkinv",sep="."),names(margin_dist))]]]
         eta_linkinv[, parameter]=FUN(eta[,parameter])
       }
       
       #### MARGINAL MODEL: Get density and probability functions for margins -> ** Creates margin_p and margin_d ####
-      
       margin_p = pFUN(    response ,mu=eta_linkinv[,"mu"] ,sigma=eta_linkinv[,"sigma"] ,nu=eta_linkinv[,"nu"],tau=   eta_linkinv[,"tau"])
       margin_d = dFUN(x = response ,mu=eta_linkinv[,"mu"] ,sigma=eta_linkinv[,"sigma"] ,nu=eta_linkinv[,"nu"],tau=   eta_linkinv[,"tau"])
         
@@ -375,7 +377,7 @@ score_function <- function(eta,dldpar,dpardeta,dlcopdpar,d2ldpar,response,phi=1,
     
     #f_k and w_k
     #f_k_quasi_newton=(-(dldpar*dldpar))
-    f_k=-(d2ldpar)
+    f_k=(d2ldpar)
     #f_k=(-(dldpar*dldpar))
     
     w_k=-f_k*(dpardeta*dpardeta)
@@ -406,13 +408,15 @@ score_function <- function(eta,dldpar,dpardeta,dlcopdpar,d2ldpar,response,phi=1,
   
 newton_raphson_iteration=function(results,input_par,phi=1,step_size=1,verbose=c(FALSE,FALSE),calc_d2=FALSE) {
     
-    #results=results;input_par=start_par;verbose=c(TRUE,TRUE); calc_d2=TRUE
+    #results=results;input_par=input_par;verbose=c(TRUE,TRUE); calc_d2=FALSE
     
     steps_all=list()
     par_out=list()
     margin_dist=results$margin_dist
     copula_dist=results$copula_dist
     
+    
+    ####COPULA DERIVATIVES####
     ### Extract COPULA DERIVATIVES from results list (from calc_joint_likelihood)
     
     dlcopdpar=list()
@@ -448,8 +452,11 @@ newton_raphson_iteration=function(results,input_par,phi=1,step_size=1,verbose=c(
       d2ldpar=(d2cdpar/copula_d)-(dldpar^2)
       
     } else {
-      d2ldpar=dldpar^2
+      d2ldpar=-(dldpar*dldpar)
     }
+    
+    #plot.new();par(mfrow=c(1,1));plot(d2ldpar[,1],-(dldpar^2)[,1])
+    #abline(a=1,b=1,col="red")
     
     copula_score=score_function(eta=eta_input,dldpar=dldpar,dpardeta=dpardeta,dlcopdpar=dldpar*0,d2ldpar=d2ldpar,response=dldpar*0,phi=phi,step_size=step_size,verbose=verbose[2]) ##Returns updated value
     
@@ -494,6 +501,8 @@ newton_raphson_iteration=function(results,input_par,phi=1,step_size=1,verbose=c(
     
     dlcopdpar_one_col=(one_two$dlcopdpar+two_three$dlcopdpar)*results$margin_d
     
+    
+    ####MARGIN DERIVATIVES####
     margin_parameters=colnames(results$eta)
     
     dlcopdpar_final=dlcopdpar_one_col
@@ -509,11 +518,11 @@ newton_raphson_iteration=function(results,input_par,phi=1,step_size=1,verbose=c(
     if(calc_d2 == TRUE) {
       d2ldpar=results$derivatives_calculated_all_margins[,c("d2ldm2","d2ldd2","d2ldv2","d2ldt2")]
     } else {
-      d2ldpar=dldpar^2
+      d2ldpar=-(dldpar*dldpar)
     }
     
     margin_score=score_function(eta=results$eta[,margin_parameters],dldpar=dldpar,dpardeta=dpardeta,dlcopdpar=dlcopdpar_final,d2ldpar=d2ldpar, response=response_final,phi=phi,step_size=step_size,verbose=verbose[1]) ##Returns updated value
-    
+
     e_k=margin_score$z_k#-results$eta_nomargin[[1]][,c("mu","sigma","nu","tau")]
     beta_r=list()
     #for (margin_number in 1:length(results$mm_all)) {
@@ -574,7 +583,7 @@ newton_raphson_iteration=function(results,input_par,phi=1,step_size=1,verbose=c(
     return(return_list)
 }
   
-#### 0. Load RAND data subset and transform to standard longitudinal dataset #######
+#### 0. Load data subset and transform to standard longitudinal dataset #######
 
 load("Data/rand_mvt.rds")
 head(rand_mvt)
@@ -582,17 +591,50 @@ head(rand_mvt)
 # Basic data setup
 response = rand_mvt[,4:(4+2)]#[,4:18] ####Currently limiting to just 5 margins for simplicity
 covariates=list()
-covariates[[1]] = as.data.frame(rand_mvt[,19]) #Age 19:33 - changed to age at start to avoid correlation with time
-covariates[[2]] = as.data.frame(rand_mvt[,34:(34+4)]) #Time 34:48
+covariates[[1]] = as.data.frame(rand_mvt[,19]) #Age 19 - changed to age at start to avoid correlation with time
+covariates[[2]] = as.data.frame(rand_mvt[,34:(34+2)]) #Time 34:48
 covariates[[3]] = as.data.frame(rand_mvt[,3]) #Gender
 
 # Setup data as longitudinal file
 dataset<-create_longitudinal_dataset(response,covariates,labels=c("subject","time","response","age","year","gender"))
 head(dataset)
 
-plotDist(dataset,"ZISICHEL")
+##### 0. OR simualte a dataset
 
-#### INPUT: Parameters ####
+# set up D-vine copula model with mixed pair-copulas
+d <- 4
+dd <- d*(d-1)/2
+order <- 1:d
+family <- c(2, 2, 2, 0, 0, 0)
+par <- c(0.2, 0.6, .9, 0, 0, 0)
+par2 <- c(5,6,7,8,9,10)
+
+# transform to R-vine matrix notation
+RVM <- D2RVine(order, family, par, par2)
+contour(RVM)
+
+n=100;t=d
+copsim=RVineSim(n*t,RVM)
+
+margin=matrix(0,ncol=ncol(copsim),nrow=nrow(copsim))
+for ( i in 1:ncol(copsim)) {
+  margin[,i]=qZISICHEL(copsim[,i])
+}
+
+response = as.data.frame(margin)
+covariates=list()
+covariates[[1]] = as.data.frame(round(runif(n,0,100),0)) #Age
+covariates[[2]] = t(t(matrix(1,ncol=t,nrow=n))*(1:t)) #Time
+covariates[[3]] = as.data.frame(round(runif(n,0,1),0)) #Gender
+
+dataset<-create_longitudinal_dataset(response,covariates,labels=c("subject","time","response","age","year","gender"))
+
+##########
+
+#plotDist(dataset,"ZISICHEL")
+#####################################################################################
+################################## INPUT: Parameters ################################
+#####################################################################################
 
 #Formulas
 mu.formula = formula("response ~ as.factor(time)+as.factor(gender)")
@@ -601,6 +643,13 @@ nu.formula = formula("~ as.factor(time)+as.factor(gender)")
 tau.formula = formula("~ age")
 theta.formula=formula("response~as.factor(time)")
 zeta.formula=formula("response~as.factor(time)")
+
+#mu.formula = formula("response ~ 1")
+#sigma.formula = formula("~ 1")
+#nu.formula = formula("~ 1")
+#tau.formula = formula("~ 1")
+#theta.formula=formula("response~as.factor(time)")
+#zeta.formula=formula("response~1")
 
 #Link functions and distributions
 margin_dist = ZISICHEL(
@@ -621,7 +670,7 @@ gamlss_model <- gamlss(formula = mu.formula
                        , sigma.formula = sigma.formula
                        , nu.formula = nu.formula
                        , tau.formula = tau.formula
-                       , family=margin_dist,data=dataset,method=RS(50))
+                       , family=margin_dist,data=dataset,method=RS(100))
 
 plot(gamlss_model)
 
@@ -631,9 +680,9 @@ fitted_margins[[1]]=gamlss_model
 #Extract margin model matrix
 mm_mar=list()
 for (parameter in c("mu","sigma","nu","tau")) {
-  print(head(model.matrix(fitted_margins[[1]],what=parameter)))
+  #print(head(model.matrix(fitted_margins[[1]],what=parameter)))
   mm_mar[[parameter]]= model.matrix(fitted_margins[[1]],what=parameter)
-  print(head(mm_mar[[parameter]]))
+  #print(head(mm_mar[[parameter]]))
 }
 
 #Fit starting copula with just an intercept for each parameter
@@ -710,8 +759,9 @@ results_start= calc_joint_likelihood(input_par =start_par  #optim_results$par
 
 print(results_start$log_lik_results)
 
-#### Newton Raphson optimisation ####
-
+#####################################################################################
+################################ INPUT: RUN ITERATIONS ##############################
+#####################################################################################
 first_input_par=start_par
 end_par_matrix=matrix(0,ncol=length(start_par),nrow=0)
 end_loglik_matrix=matrix(0,ncol=1,nrow=0)
@@ -723,6 +773,7 @@ step_adjustment=0.5^(1/2)
 step_size=1
 verbose_option=c(FALSE,FALSE)
 stopifnegative=FALSE
+calc_d2=FALSE
 while ((abs(change) > .1*phi*step_adjustment) & run_counter <= 100) { #
   if(!first_run) {start_log_lik=results$log_lik_results} else {input_par=first_input_par; phi_inner=phi}
 
@@ -741,7 +792,7 @@ while ((abs(change) > .1*phi*step_adjustment) & run_counter <= 100) { #
                                , return_option="list"
                                , dataset=dataset
                                , verbose=FALSE
-                               ,calc_d2 = TRUE
+                               ,calc_d2 = calc_d2
                                 )
 
   end_log_lik=results$log_lik_results
@@ -758,7 +809,7 @@ while ((abs(change) > .1*phi*step_adjustment) & run_counter <= 100) { #
                                          ,phi=phi_inner
                                          ,step_size=step_size
                                          ,verbose=verbose_option
-                                         ,calc_d2=TRUE)
+                                         ,calc_d2=calc_d2)
   cbind(iteration_out[[1]],iteration_out[[2]])
   end_par=iteration_out[[2]]
   input_par=end_par
@@ -771,15 +822,16 @@ while ((abs(change) > .1*phi*step_adjustment) & run_counter <= 100) { #
   pars=round(sqrt(ncol(end_par_matrix)+1),0)
   plot.new();par(mfrow=c(pars,pars+1))
   for (par_name in colnames(end_par_matrix)) {
-    scale_range=0.5
-    if(abs((end_par_matrix[nrow(end_par_matrix),par_name]-start_par[par_name]))>abs(scale_range*start_par[par_name])){
-      plot(1:nrow(end_par_matrix),end_par_matrix[,par_name],main=par_name)            
-    } else {
-      lims=c(start_par[par_name]-abs(start_par[par_name])*scale_range,start_par[par_name]+abs(start_par[par_name])*scale_range)
-      plot(1:nrow(end_par_matrix),end_par_matrix[,par_name],main=par_name,ylim=lims)
-    }
-    
+    #scale_range=0.5
+    #if(abs((end_par_matrix[nrow(end_par_matrix),par_name]-start_par[par_name]))>abs(scale_range*start_par[par_name])){
+    #            
+    #} else {
+    #  lims=c(start_par[par_name]-abs(start_par[par_name])*scale_range,start_par[par_name]+abs(start_par[par_name])*scale_range)
+    #  plot(1:nrow(end_par_matrix),end_par_matrix[,par_name],main=par_name,ylim=lims)
+    #}
+    plot(1:nrow(end_par_matrix),end_par_matrix[,par_name],main=par_name)  
   }
+  
   plot(1:nrow(end_par_matrix),end_loglik_matrix[,1],main="loglik")
   
   if(stopifnegative==TRUE) {
@@ -812,7 +864,7 @@ final_results= calc_joint_likelihood(input_par =end_par  #optim_results$par
                                , return_option="list"
                                , dataset=dataset
                                , verbose=FALSE
-                               , calc_d2=TRUE
+                               , calc_d2=calc_d2
 )
 
 
