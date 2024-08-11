@@ -693,7 +693,7 @@ step_adjustment=0.5^0.5
 step_size=1
 verbose_option=c(FALSE,FALSE)
 stopifnegative=FALSE
-while ((abs(change) > .05*phi| run_counter <= 100) & run_counter <= 100) { #
+while ((abs(change) > .1*phi) & run_counter <= 100) { #
   if(!first_run) {start_log_lik=results$log_lik_results} else {input_par=first_input_par; phi_inner=phi}
 
   #print(input_par)
