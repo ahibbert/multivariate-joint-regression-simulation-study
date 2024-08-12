@@ -1,4 +1,4 @@
-#The goal of this code is to develop a prototype for a 'GJRM-L' function which allows a user to specify a model
+# a user to specify a model
 #in the form of a univariate longitudinal model e.g. lme4, gamlss with random, and have it estimated as a 
 #copula-based joint regression model.
 #GJRM-L(mu.formula, sigma.formula,nu.formula,zeta.forula, tau.formula, other.formula,
@@ -11,7 +11,9 @@ library(gamlss)
 library(VineCopula)
 #library(copula)
 
-#### 0. Functions ####
+simOption=2
+
+#### 1. Functions ####
 
 create_longitudinal_dataset <- function(response,covariates,labels=NA) {
   num_time_points=ncol(response)
@@ -177,7 +179,7 @@ logit <- function(x) {
   return(log(x/(1-x)))
 }
 
-logit_inv <- function(x) {
+logit<- function(x) {
   return(
     exp(x)/(1+exp(x))
   )
@@ -313,8 +315,8 @@ calc_joint_likelihood <- function(input_par,mm_mar,margin_dist,copula_dist,retur
         names(derivatives_copula)=c("dldth","dldz","dcdu1","dcdu2","dthdeta","dzdeta")
       }
       
-      return_list=list(log_lik_results,response,margin_d,margin_p,copula_d,derivatives_copula,margin_dist,copula_dist,eta,eta_linkinv,derivatives_calculated_all_margins,mm_mar,start_par,eta_cop,eta_cop_link_inv,mm_cop)
-      names(return_list)=c("log_lik_results","response","margin_d","margin_p","copula_d","derivatives_copula","margin_dist","copula_dist","eta","eta_linkinv","derivatives_calculated_all_margins","mm_mar","start_par","eta_cop","eta_cop_link_inv","mm_cop")
+      return_list=list(log_lik_results,num_margins,response,margin_d,margin_p,copula_d,derivatives_copula,margin_dist,copula_dist,eta,eta_linkinv,derivatives_calculated_all_margins,mm_mar,start_par,eta_cop,eta_cop_link_inv,mm_cop)
+      names(return_list)=c("log_lik_results","num_margins","response","margin_d","margin_p","copula_d","derivatives_copula","margin_dist","copula_dist","eta","eta_linkinv","derivatives_calculated_all_margins","mm_mar","start_par","eta_cop","eta_cop_link_inv","mm_cop")
       
       if (return_option == "list") {
         if (verbose==TRUE) {
@@ -367,7 +369,7 @@ extract_parameters_from_fitted <- function(fitted_margins,fitted_copulas=NA,copu
 
 score_function <- function(eta,dldpar,dpardeta,dlcopdpar,response,phi=1,step_size=1,verbose=TRUE) {
     #u_k
-    dlcopdpar=dlcopdpar*((dldpar)*response)
+    #dlcopdpar=dlcopdpar#*((dldpar)*response)
     
     dldpar=dldpar+dlcopdpar #commented out for now until we come back and fix it
     
@@ -411,21 +413,21 @@ newton_raphson_iteration=function(results,input_par,phi=1,step_size=1,verbose=c(
     par_out=list()
     margin_dist=results$margin_dist
     copula_dist=results$copula_dist
+    d=results$num_margins
+    n=length(results$response)/d
     
-    ### Extract COPULA DERIVATIVES from results list (from calc_joint_likelihood)
+    # Extract COPULA DERIVATIVES from results list (from calc_joint_likelihood)
     
-    dlcopdpar=list()
-    dldth=results$derivatives_copula$dldth
-    dldz=results$derivatives_copula$dldz
-    dthdeta=results$derivatives_copula$dthdeta
-    dzdeta=results$derivatives_copula$dzdeta
-    dcdu1=results$derivatives_copula$dcdu1
-    dcdu2=results$derivatives_copula$dcdu2
+    dlcopdpar=list();
+    dldth=results$derivatives_copula$dldth;
+    dldz=results$derivatives_copula$dldz;
+    dthdeta=results$derivatives_copula$dthdeta;
+    dzdeta=results$derivatives_copula$dzdeta;
+    dcdu1=results$derivatives_copula$dcdu1;
+    dcdu2=results$derivatives_copula$dcdu2;
     
     dldpar=cbind(dldth,dldz)
-    #d2ldpar=cbind(d2ldth,d2ldz)
     dpardeta=cbind(dthdeta,dzdeta)
-    #dpardeta=dldpar*0+1 ##########Temporary step
     
     dlcopdpar=(dcdu1+dcdu2)/(results$copula_d) #+ (dcdu2)/results$copula_d[,i]  #*(results$margin_d[,i]*results$margin_d[,i+1])
     
@@ -434,14 +436,13 @@ newton_raphson_iteration=function(results,input_par,phi=1,step_size=1,verbose=c(
     copula_score=score_function(eta=eta_input,dldpar=dldpar,dpardeta=dpardeta,dlcopdpar=dldpar*0,response=dldpar*0,phi=phi,step_size=step_size,verbose=verbose[2]) ##Returns updated value
     
     beta_new_cop=list()
-    #parameter_names=c("theta","zeta")
     cop_parameter_names=c("theta","zeta")
     
     hess_list=list()
     
     e_k=copula_score$z_k  
     beta_new_cop=list()
-    for (j in 1:ncol(copula_score$z_k)) {
+    for (j in 1:ncol(e_k)) {
       mm=mm_cop[[j]]
       X=as.matrix(mm)
       W=diag(copula_score$w_k[,j])
@@ -454,41 +455,39 @@ newton_raphson_iteration=function(results,input_par,phi=1,step_size=1,verbose=c(
       }
     }
     
-    one=cbind(dataset[dataset$time %in% unique(dataset$time)[1:(length(unique(dataset$time))-1)],c("time","subject")],dlcopdpar)
-    two=cbind(dataset[!(dataset$time %in% unique(dataset$time)[1:(length(unique(dataset$time))-1)]),c("time","subject")],0)
-    colnames(two)=colnames(one)
-    one_two=rbind(one,two)
+    # Put all copula derivatives in corrrect structure for calculation of marginal likelihood functions
+    # Copula derivatives are of the form time1/time2/response so there are n-1 copula derivatives. For the margins, the copula value is for all margins related to that time point summed.
     
-    one=cbind(dataset[!(dataset$time %in% unique(dataset$time)[2:(length(unique(dataset$time)))]),c("time","subject")],0)
-    two=cbind(dataset[dataset$time %in% unique(dataset$time)[2:(length(unique(dataset$time)))],c("time","subject")],dlcopdpar)
-    colnames(one)=colnames(two)
-    two_three=rbind(one,two)
+    margin_parameters=names(results$mm_mar)
     
-    one_two=one_two[order(one_two$subject,one_two$time),]
-    two_three=two_three[order(two_three$subject,two_three$time),]
-    
-    ###CHECKS ON ORDERING
-    all(one_two$time==two_three$time)
-    all(one_two$time==dataset$time)
-    all(one_two$subject==two_three$subject)
-    all(one_two$subject==dataset$subject)
-    
-    dlcopdpar_one_col=(one_two$dlcopdpar+two_three$dlcopdpar)*results$margin_d
-    
-    margin_parameters=colnames(results$eta)
-    
-    dlcopdpar_final=dlcopdpar_one_col
-    response_final=results$response
-    for (i in 2:length(margin_parameters)) {
-      dlcopdpar_final=cbind(dlcopdpar_final,dlcopdpar_one_col)
-      response_final=cbind(response_final,results$response)
-    }
+    # Extract MARGINAL DERIVATIVES from results list (from calc_joint_likelihood)
     
     dldpar=results$derivatives_calculated_all_margins[,c("dldm","dldd","dldv","dldt")] #First derivative of log likelihood w.r.t. parameters
-    #d2ldpar=results$derivatives_calculated_all_margins[,c("d2ldm2","d2ldd2","d2ldv2","d2ldt2")] #Quasi newton second derivative of log function w.r.t parameters
     dpardeta=results$derivatives_calculated_all_margins[,c("mu.dr","sigma.dr","nu.dr","tau.dr")] #Derivative of inverse link function
     
-    margin_score=score_function(eta=results$eta[,margin_parameters],dldpar=dldpar,dpardeta=dpardeta,dlcopdpar=dlcopdpar_final,response=response_final,phi=phi,step_size=step_size,verbose=verbose[1]) ##Returns updated value
+     #So what we need is: dcdu*x*dfdmu/copula_c
+    time_patient_id_cop_t1=time_patient_id_cop_t2=matrix(ncol=2,nrow=0)
+    for (i in 1:(d-1)) {
+      time_patient_id_cop_t1=rbind(time_patient_id_cop_t1,cbind(i,(1:n)))
+      time_patient_id_cop_t2=rbind(time_patient_id_cop_t2,cbind(i+1,(1:n)))
+    }
+    colnames(time_patient_id_cop_t1)=colnames(time_patient_id_cop_t2) = c("time",'subject')
+    
+    time_patient_id_mar=dataset[,c("time","subject")]
+  
+    dlcopdpar_merged_time1=merge(time_patient_id_mar,cbind(time_patient_id_cop_t1,dlcopdpar),by=c("time","subject"),all.x = TRUE)
+    dlcopdpar_time2=merge(time_patient_id_mar,cbind(time_patient_id_cop_t2,dlcopdpar),by=c("time","subject"),all.x = TRUE)
+    dlcopdpar_merged=cbind(dldcop_merged_time1,dldcop_merged_time2)
+    dlcopdpar_merged[is.na(dlcopdpar_merged)] <- 0
+    dlcopdpar_margin_sum=dlcopdpar_merged[,3]+dlcopdpar_merged[,6]
+    
+    
+    dlcopdpar_full=matrix(ncol=ncol(dldpar),nrow=nrow(dldpar))
+    for (i in 1:ncol(dldpar)) {
+      dlcopdpar_full[,i]=dlcopdpar_margin_sum*results$response*exp(dldpar[,i])  
+    }
+    
+    margin_score=score_function(eta=results$eta[,margin_parameters],dldpar=dldpar,dpardeta=dpardeta,dlcopdpar=dlcopdpar_full,response=results$response,phi=phi,step_size=step_size,verbose=verbose[1]) ##Returns updated value
     
     e_k=margin_score$z_k#-results$eta_nomargin[[1]][,c("mu","sigma","nu","tau")]
     beta_r=list()
@@ -544,32 +543,75 @@ newton_raphson_iteration=function(results,input_par,phi=1,step_size=1,verbose=c(
     return(return_list)
 }
   
-#### 0. Load RAND data subset and transform to standard longitudinal dataset #######
+#### 2. Load RAND data subset and transform to standard longitudinal dataset #######
 
-load("Data/rand_mvt.rds")
-head(rand_mvt)
+if (simOption==1) {
+  
+  load("Data/rand_mvt.rds")
+  head(rand_mvt)
+  
+  # Basic data setup
+  response = rand_mvt[,4:(4+2)]#[,4:18] ####Currently limiting to just 5 margins for simplicity
+  covariates=list()
+  covariates[[1]] = as.data.frame(rand_mvt[,19]) #Age 19:33 - changed to age at start to avoid correlation with time
+  covariates[[2]] = as.data.frame(rand_mvt[,34:(34+4)]) #Time 34:48
+  covariates[[3]] = as.data.frame(rand_mvt[,3]) #Gender
+  
+  # Setup data as longitudinal file
+  dataset<-create_longitudinal_dataset(response,covariates,labels=c("subject","time","response","age","year","gender"))
+  head(dataset)
 
-# Basic data setup
-response = rand_mvt[,4:(4+2)]#[,4:18] ####Currently limiting to just 5 margins for simplicity
-covariates=list()
-covariates[[1]] = as.data.frame(rand_mvt[,19]) #Age 19:33 - changed to age at start to avoid correlation with time
-covariates[[2]] = as.data.frame(rand_mvt[,34:(34+4)]) #Time 34:48
-covariates[[3]] = as.data.frame(rand_mvt[,3]) #Gender
+} else if (simOption==2) {
 
-# Setup data as longitudinal file
-dataset<-create_longitudinal_dataset(response,covariates,labels=c("subject","time","response","age","year","gender"))
-head(dataset)
+  # set up D-vine copula model with mixed pair-copulas
+  d <- 4
+  dd <- d*(d-1)/2
+  order <- 1:d
+  family <- c(2, 2, 2, 0, 0, 0)
+  par <- c(0.2, 0.6, .9, 0, 0, 0)
+  par2 <- c(5,6,7,8,9,10)
+  
+  # transform to R-vine matrix notation
+  RVM <- D2RVine(order, family, par, par2)
+  contour(RVM)
+  
+  n=100;t=d
+  copsim=RVineSim(n,RVM)
+  
+  margin=matrix(0,ncol=ncol(copsim),nrow=nrow(copsim))
+  for ( i in 1:ncol(copsim)) {
+    margin[,i]=qZISICHEL(copsim[,i])
+  }
+  
+  response = as.data.frame(margin)
+  covariates=list()
+  covariates[[1]] = as.data.frame(round(runif(n,0,100),0)) #Age
+  covariates[[2]] = t(t(matrix(1,ncol=t,nrow=n))*(1:t)) #Time
+  covariates[[3]] = as.data.frame(round(runif(n,0,1),0)) #Gender
+  
+  dataset<-create_longitudinal_dataset(response,covariates,labels=c("subject","time","response","age","year","gender"))
+
+} else {
+  print("No SimOption loaded")
+}
 
 plotDist(dataset,"ZISICHEL")
 
-#### INPUT: Parameters ####
+#### 3. INPUT: Parameters ####
 
 #Formulas
-mu.formula = formula("response ~ as.factor(time)+as.factor(gender)+age")
-sigma.formula = formula("~ as.factor(time)+age")
-nu.formula = formula("~ as.factor(time)+as.factor(gender)")
-tau.formula = formula("~ age")
-theta.formula=formula("response~as.factor(gender)")
+#mu.formula = formula("response ~ as.factor(time)+as.factor(gender)+age")
+#sigma.formula = formula("~ as.factor(time)+age")
+#nu.formula = formula("~ as.factor(time)+as.factor(gender)")
+#tau.formula = formula("~ age")
+#theta.formula=formula("response~as.factor(gender)")
+#zeta.formula=formula("response~1")
+
+mu.formula = formula("response ~ 1")
+sigma.formula = formula("~ 1")
+nu.formula = formula("~ 1")
+tau.formula = formula("~ 1")
+theta.formula=formula("response~1")
 zeta.formula=formula("response~1")
 
 #Link functions and distributions
@@ -584,7 +626,7 @@ copula_dist="t"
 copula_link=list(logit,logit_inv,log_2plus,log_2plus_inv,dlogit,dlog_2plus)
 names(copula_link)=c("theta.linkfun","theta.linkinv","zeta.linkfun","zeta.linkinv","dthdeta","dzdeta")
 
-##### Setup model matrices and parameter vector for optimisation #####
+#### 4. Setup model matrices and parameter vector for optimisation ####
 
 #Fit gamlss marginal model
 gamlss_model <- gamlss(formula = mu.formula
@@ -680,7 +722,7 @@ results_start= calc_joint_likelihood(input_par =start_par  #optim_results$par
 
 print(results_start$log_lik_results)
 
-#### Newton Raphson optimisation ####
+#### 5. Newton Raphson optimisation ####
 
 first_input_par=start_par
 end_par_matrix=matrix(0,ncol=length(start_par),nrow=0)
@@ -693,7 +735,7 @@ step_adjustment=0.5^0.5
 step_size=1
 verbose_option=c(FALSE,FALSE)
 stopifnegative=FALSE
-while ((abs(change) > .1*phi) & run_counter <= 100) { #
+while ((abs(change) > .05*phi*step_adjustment) & run_counter <= 100) { #
   if(!first_run) {start_log_lik=results$log_lik_results} else {input_par=first_input_par; phi_inner=phi}
 
   #print(input_par)
@@ -753,7 +795,7 @@ print(results_start$log_lik_results)
 print("Joint likelihood")
 print(results$log_lik_results)
 
-###############
+#### 6. Post-optimisation calculations ####
 
 final_results= calc_joint_likelihood(input_par =end_par  #optim_results$par
                                ,mm_mar = mm_mar
