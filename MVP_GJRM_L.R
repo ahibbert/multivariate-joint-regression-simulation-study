@@ -11,7 +11,7 @@ library(gamlss)
 library(VineCopula)
 #library(copula)
 
-simOption=2
+simOption=1
 
 #### 1. Functions ####
 
@@ -476,11 +476,10 @@ newton_raphson_iteration=function(results,input_par,phi=1,step_size=1,verbose=c(
     time_patient_id_mar=dataset[,c("time","subject")]
   
     dlcopdpar_merged_time1=merge(time_patient_id_mar,cbind(time_patient_id_cop_t1,dlcopdpar),by=c("time","subject"),all.x = TRUE)
-    dlcopdpar_time2=merge(time_patient_id_mar,cbind(time_patient_id_cop_t2,dlcopdpar),by=c("time","subject"),all.x = TRUE)
-    dlcopdpar_merged=cbind(dldcop_merged_time1,dldcop_merged_time2)
+    dlcopdpar_merged_time2=merge(time_patient_id_mar,cbind(time_patient_id_cop_t2,dlcopdpar),by=c("time","subject"),all.x = TRUE)
+    dlcopdpar_merged=cbind(dlcopdpar_merged_time1,dlcopdpar_merged_time2)
     dlcopdpar_merged[is.na(dlcopdpar_merged)] <- 0
     dlcopdpar_margin_sum=dlcopdpar_merged[,3]+dlcopdpar_merged[,6]
-    
     
     dlcopdpar_full=matrix(ncol=ncol(dldpar),nrow=nrow(dldpar))
     for (i in 1:ncol(dldpar)) {
@@ -595,7 +594,7 @@ if (simOption==1) {
   print("No SimOption loaded")
 }
 
-plotDist(dataset,"ZISICHEL")
+#plotDist(dataset,"ZISICHEL")
 
 #### 3. INPUT: Parameters ####
 
@@ -724,7 +723,7 @@ print(results_start$log_lik_results)
 
 #### 5. Newton Raphson optimisation ####
 
-first_input_par=start_par
+first_input_par=start_par*0.8
 end_par_matrix=matrix(0,ncol=length(start_par),nrow=0)
 end_loglik_matrix=matrix(0,ncol=1,nrow=0)
 first_run=TRUE
