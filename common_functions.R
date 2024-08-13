@@ -642,7 +642,7 @@ dlogit <- function(x) {
 }
 
 dlog_2plus <- function(x) {
-  return(1/(x-2))
+  return(-1/(x-2))
 }
 
 #Generate the copula model matrix
@@ -677,7 +677,7 @@ generate_cop_model_matrix = function(dataset,theta.formula=formula(~1),zeta.form
 
 calc_joint_likelihood <- function(input_par,mm_mar,margin_dist,copula_dist,return_option="list",copula_link,dataset,mm_cop,verbose=TRUE,calc_d2=FALSE,dFUN=dZISICHEL,pFUN=pZISICHEL)  {
   
-  #return_option="list";input_par=input_par;copula_dist="t";margin_dist = ZISICHEL(mu.link = "log",sigma.link = "log",nu.link = "identity",tau.link = "logit");verbose=TRUE;dFUN=dZISICHEL;pFUN=pZISICHEL;calc_d2=TRUE
+  #return_option="list";input_par=start_par;copula_dist="t";margin_dist = ZISICHEL(mu.link = "log",sigma.link = "log",nu.link = "identity",tau.link = "logit");verbose=TRUE;dFUN=dZISICHEL;pFUN=pZISICHEL;calc_d2=TRUE
   
   #tryCatch(
   #  {
@@ -729,6 +729,9 @@ calc_joint_likelihood <- function(input_par,mm_mar,margin_dist,copula_dist,retur
   copula_d=dcdu1=dcdu2=dldth=d2ldth=dldz=d2ldz=dthdeta=dzdeta=matrix(0,nrow=nrow(eta_cop),ncol=1)
   
   margin_p_cop_input=cbind(margin_p[dataset$time %in% margin_names[1:(num_margins-1)]],margin_p[dataset$time %in% margin_names[2:(num_margins)]])
+  
+  order_copula=cbind(dataset[dataset$time %in% margin_names[1:(num_margins-1)],c("time","subject")],dataset[dataset$time %in% margin_names[2:(num_margins)],c("time","subject")])
+  names(order_copula)=c("time1","subject1","time2","subject2")
   
   copula_d=BiCopPDF(  margin_p_cop_input[,1],margin_p_cop_input[,2],family = as.vector(BiCopName(copula_dist)),par=eta_cop_link_inv[,"theta"],par2=eta_cop_link_inv[,"zeta"])
   dldth=BiCopDeriv(   margin_p_cop_input[,1],margin_p_cop_input[,2],family = as.vector(BiCopName(copula_dist)),par=eta_cop_link_inv[,"theta"],par2=eta_cop_link_inv[,"zeta"],deriv="par",log=TRUE)
@@ -784,8 +787,8 @@ calc_joint_likelihood <- function(input_par,mm_mar,margin_dist,copula_dist,retur
     names(derivatives_copula)=c("dldth","dldz","dcdu1","dcdu2","dthdeta","dzdeta")
   }
   
-  return_list=list(log_lik_results,response,margin_d,margin_p,copula_d,derivatives_copula,margin_dist,copula_dist,eta,eta_linkinv,derivatives_calculated_all_margins,mm_mar,start_par,eta_cop,eta_cop_link_inv,mm_cop)
-  names(return_list)=c("log_lik_results","response","margin_d","margin_p","copula_d","derivatives_copula","margin_dist","copula_dist","eta","eta_linkinv","derivatives_calculated_all_margins","mm_mar","start_par","eta_cop","eta_cop_link_inv","mm_cop")
+  return_list=list(log_lik_results,response,margin_d,margin_p,copula_d, order_copula,derivatives_copula,margin_dist,copula_dist,eta,eta_linkinv,derivatives_calculated_all_margins,mm_mar,start_par,eta_cop,eta_cop_link_inv,mm_cop)
+  names(return_list)=c("log_lik_results","response","margin_d","margin_p","copula_d","order_copula","derivatives_copula","margin_dist","copula_dist","eta","eta_linkinv","derivatives_calculated_all_margins","mm_mar","start_par","eta_cop","eta_cop_link_inv","mm_cop")
   
   if (return_option == "list") {
     if (verbose==TRUE) {
@@ -836,21 +839,20 @@ extract_parameters_from_fitted <- function(fitted_margins,fitted_copulas=NA,copu
   return(return_list)
 }
 
-score_function <- function(eta,dldpar,dpardeta,dlcopdpar,response,phi=1,step_size=1,verbose=TRUE) {
-  #u_k
-  dlcopdpar=dlcopdpar*((dldpar)*response)
+score_function <- function(eta,dldpar,dpardeta,dlcopdpar,response,phi=1,step_size=1,verbose=TRUE,crit_wk=0.0000001) {
   
-  dldpar=dldpar+dlcopdpar #commented out for now until we come back and fix it
+  dldpar=dldpar+dlcopdpar
   
   u_k=dldeta = dldpar * dpardeta
-  
-  #f_k and w_k
-  #f_k_quasi_newton=(-(dldpar*dldpar))
   f_k=-(dldpar^2)
-  
   w_k=-f_k*(dpardeta*dpardeta)
+
+  #Stop if weights are too small
+  w_k[w_k<crit_wk]=1
+  u_k[w_k<crit_wk]=0
   
-  #w_k=matrix(1,ncol=ncol(f_k),nrow=nrow(f_k)) ####Weights of 1
+  #w_k[u_k<crit_wk]=1
+  #u_k[u_k<crit_wk]=crit_wk
   
   z_k=(1-phi)*eta+phi*(eta+step_size*(u_k/w_k))
   
@@ -863,7 +865,7 @@ score_function <- function(eta,dldpar,dpardeta,dlcopdpar,response,phi=1,step_siz
                            ,colMeans(f_k)
                            ,colMeans(w_k)
                            ,colMeans(u_k)
-                           ,colMeans((1/w_k)*u_k)
+                           ,colMeans(u_k/w_k)
                            ,colMeans(z_k)
     ),8)
     rownames(steps_mean)=c("eta","dldpar","dlcopdpar","dpardeta","dpardeta2","f_k","w_k","u_k","(1/w_k)*u_k","z_k")
@@ -876,14 +878,15 @@ score_function <- function(eta,dldpar,dpardeta,dlcopdpar,response,phi=1,step_siz
 
 newton_raphson_iteration=function(results,input_par,phi=1,step_size=1,verbose=c(FALSE,FALSE),calc_d2=FALSE) {
   
-  #results=final_results;input_par=end_par_matrix[which.max(end_loglik_matrix),] ;verbose=c(TRUE,TRUE); calc_d2=TRUE
-  
+  #results=results;input_par=input_par ;verbose=c(TRUE,TRUE); calc_d2=FALSE
   steps_all=list()
   par_out=list()
   margin_dist=results$margin_dist
   copula_dist=results$copula_dist
   
-  ### Extract COPULA DERIVATIVES from results list (from calc_joint_likelihood)
+  ##### COPULA ITERATION 
+  
+  # Extract COPULA DERIVATIVES from results list (from calc_joint_likelihood)
   
   dlcopdpar=list()
   dldth=results$derivatives_copula$dldth
@@ -898,7 +901,7 @@ newton_raphson_iteration=function(results,input_par,phi=1,step_size=1,verbose=c(
   dpardeta=cbind(dthdeta,dzdeta)
   #dpardeta=dldpar*0+1 ##########Temporary step
   
-  dlcopdpar=(dcdu1+dcdu2)/(results$copula_d) #+ (dcdu2)/results$copula_d[,i]  #*(results$margin_d[,i]*results$margin_d[,i+1])
+  #dlcopdpar=(dcdu1+dcdu2)/(results$copula_d) #+ (dcdu2)/results$copula_d[,i]  #*(results$margin_d[,i]*results$margin_d[,i+1])
   
   eta_input=cbind(results$eta_cop[,"theta"],results$eta_cop[,"zeta"])
   colnames(eta_input)=names(results$eta_cop)
@@ -924,46 +927,42 @@ newton_raphson_iteration=function(results,input_par,phi=1,step_size=1,verbose=c(
       hess_list[[(cop_parameter_names[j])]]=-t(X)%*%W%*%X
     }
   }
-  
-  one=cbind(dataset[dataset$time %in% unique(dataset$time)[1:(length(unique(dataset$time))-1)],c("time","subject")],dlcopdpar)
-  two=cbind(dataset[!(dataset$time %in% unique(dataset$time)[1:(length(unique(dataset$time))-1)]),c("time","subject")],0)
-  colnames(two)=colnames(one)
-  one_two=rbind(one,two)
-  
-  one=cbind(dataset[!(dataset$time %in% unique(dataset$time)[2:(length(unique(dataset$time)))]),c("time","subject")],0)
-  two=cbind(dataset[dataset$time %in% unique(dataset$time)[2:(length(unique(dataset$time)))],c("time","subject")],dlcopdpar)
-  colnames(one)=colnames(two)
-  two_three=rbind(one,two)
-  
-  one_two=one_two[order(one_two$subject,one_two$time),]
-  two_three=two_three[order(two_three$subject,two_three$time),]
-  
-  ###CHECKS ON ORDERING
-  all(one_two$time==two_three$time)
-  all(one_two$time==dataset$time)
-  all(one_two$subject==two_three$subject)
-  all(one_two$subject==dataset$subject)
-  
-  dlcopdpar_one_col=(one_two$dlcopdpar+two_three$dlcopdpar)*results$margin_d
+
+  ##### MARGIN ITERATION
   
   margin_parameters=colnames(results$eta)
-  
-  dlcopdpar_final=dlcopdpar_one_col
-  response_final=results$response
-  for (i in 2:length(margin_parameters)) {
-    dlcopdpar_final=cbind(dlcopdpar_final,dlcopdpar_one_col)
-    response_final=cbind(response_final,results$response)
-  }
-  
+   
   dldpar=results$derivatives_calculated_all_margins[,c("dldm","dldd","dldv","dldt")] #First derivative of log likelihood w.r.t. parameters
-  
-  if (calc_d2==TRUE) {
-    d2ldpar=results$derivatives_calculated_all_margins[,c("d2ldm2","d2ldd2","d2ldv2","d2ldt2")] #Quasi newton second derivative of log function w.r.t parameters
-  }
-  
+  if (calc_d2==TRUE) {d2ldpar=results$derivatives_calculated_all_margins[,c("d2ldm2","d2ldd2","d2ldv2","d2ldt2")]} #Quasi newton second derivative of log function w.r.t parameters}
   dpardeta=results$derivatives_calculated_all_margins[,c("mu.dr","sigma.dr","nu.dr","tau.dr")] #Derivative of inverse link function
+    
+  #Calculating derivatives of the copula function with regard to marginal parameters
+  #OK so what we want for dldcop is x2*dldpar(x2)*margin_d(x2)*dcdu2 + x1*dldpar(x1)*margin_d(x1)*dcdu1
   
-  margin_score=score_function(eta=results$eta[,margin_parameters],dldpar=dldpar,dpardeta=dpardeta,dlcopdpar=dlcopdpar_final*0,response=response_final,phi=phi,step_size=step_size,verbose=verbose[1]) ##Returns updated value
+  order_margin=dataset[,c("time","subject")]
+  margin_components=cbind(order_margin,results$response,results$margin_d,dldpar)
+  copula_components=cbind(results$order_copula,dcdu1,dcdu2,results$copula_d)
+    
+  #head(margin_components)
+  #head(copula_components)
+  #head(margin_copula_merged)
+  
+  margin_copula_merged=merge(margin_components,copula_components,by.x=c("time","subject"),by.y=c("time1","subject1"),all.x=TRUE)
+  margin_copula_merged_2=merge(margin_copula_merged,margin_components,by.x=c("time2","subject2"),by.y=c("time","subject"),all.x=TRUE)
+  
+  margin_deriv_names=colnames(results$derivatives_calculated_all_margins)[grepl("dld",colnames(results$derivatives_calculated_all_margins))]
+  
+  dlcopdpar=dldpar*0
+  
+  margin_copula_merged_2[is.na(margin_copula_merged_2)]=0
+  for (i in 1:length(margin_deriv_names)) {
+    dlcopdpar[,i]= 
+      margin_copula_merged_2[,"dcdu1"]*margin_copula_merged_2[,"results$response.x"]*margin_copula_merged_2[,"results$margin_d.x"]*margin_copula_merged_2[,paste(margin_deriv_names[i],".x",sep="")]/margin_copula_merged_2[,"results$copula_d"]
+      #+ margin_copula_merged_2[,"dcdu2"]*margin_copula_merged_2[,"results$response.y"]*margin_copula_merged_2[,"results$margin_d.y"]*margin_copula_merged_2[,paste(margin_deriv_names[i],".y",sep="")]/margin_copula_merged_2[,"results$copula_d"]
+  }
+  dlcopdpar[is.na(dlcopdpar)]=0
+  
+  margin_score=score_function(eta=results$eta[,margin_parameters],dldpar=dldpar,dpardeta=dpardeta,dlcopdpar=dlcopdpar,response=response_final,phi=phi,step_size=step_size,verbose=TRUE) ##Returns updated value
   
   e_k=margin_score$z_k#-results$eta_nomargin[[1]][,c("mu","sigma","nu","tau")]
   beta_r=list()
@@ -1011,7 +1010,7 @@ newton_raphson_iteration=function(results,input_par,phi=1,step_size=1,verbose=c(
   return(return_list)
 }
 
-loadDataset <- function(simOption,plot=FALSE) {
+loadDataset <- function(simOption,plot=FALSE,n=100) {
 
   if (simOption==1) {
     load("Data/rand_mvt.rds")
@@ -1032,15 +1031,15 @@ loadDataset <- function(simOption,plot=FALSE) {
     dd <- d*(d-1)/2
     order <- 1:d
     family <- c(2, 2, 0)
-    par <- c(logit_inv(.4), logit_inv(.4), logit_inv(.4))
-    par2 <- c(log_2plus_inv(1.1),log_2plus_inv(1.1),log_2plus_inv(1.1))
+    par <- c(logit_inv(.8), logit_inv(.8), logit_inv(.8))
+    par2 <- c(log_2plus_inv(2.1),log_2plus_inv(2.1),log_2plus_inv(2.1))
     
     
     # transform to R-vine matrix notation
     RVM <- D2RVine(order, family, par, par2)
     contour(RVM)
     
-    n=1000;t=d
+    t=d
     copsim=RVineSim(n*t,RVM)
     
     margin=matrix(0,ncol=ncol(copsim),nrow=nrow(copsim))

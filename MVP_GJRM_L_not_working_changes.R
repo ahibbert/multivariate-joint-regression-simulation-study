@@ -600,12 +600,12 @@ head(dataset)
 ##### 0. OR simualte a dataset
 
 # set up D-vine copula model with mixed pair-copulas
-d <- 4
+d <- 3
 dd <- d*(d-1)/2
 order <- 1:d
-family <- c(2, 2, 2, 0, 0, 0)
-par <- c(0.2, 0.6, .9, 0, 0, 0)
-par2 <- c(5,6,7,8,9,10)
+family <- c(2, 2, 0)
+par <- c(0.2, 0.9, .9)
+par2 <- c(5,10,7)
 
 # transform to R-vine matrix notation
 RVM <- D2RVine(order, family, par, par2)

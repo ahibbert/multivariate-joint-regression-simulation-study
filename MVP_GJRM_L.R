@@ -12,14 +12,14 @@ library(VineCopula)
 simOption=2
 
 #### 0. Load RAND data subset and transform to standard longitudinal dataset #######
-dataset=loadDataset(simOption)
+dataset=loadDataset(simOption,n=1000)
 
 #### INPUT: Parameters ####
 
 #Formulas
 
-mu.formula = formula("response ~ as.factor(time)")#mu.formula = formula("response ~ as.factor(time)+as.factor(gender)+age")
-sigma.formula = formula("~ as.factor(time)")#sigma.formula = formula("~ as.factor(time)+age")
+mu.formula = formula("response ~ time")#mu.formula = formula("response ~ as.factor(time)+as.factor(gender)+age")
+sigma.formula = formula("~ time")#sigma.formula = formula("~ as.factor(time)+age")
 nu.formula = formula("~ 1")#nu.formula = formula("~ as.factor(time)+as.factor(gender)")
 tau.formula = formula("~ 1")#tau.formula = formula("~ age")
 theta.formula=formula("response~1")#theta.formula=formula("response~as.factor(gender)")
@@ -109,19 +109,18 @@ print(results_start$log_lik_results)
 
 first_input_par=start_par
 end_par_matrix=matrix(0,ncol=length(start_par),nrow=0)
-end_loglik_matrix=matrix(0,ncol=1,nrow=0)
+end_loglik_matrix=matrix(0,ncol=3,nrow=0)
 first_run=TRUE
 change=1
 run_counter=1
-phi=1
-step_adjustment=0.5^(1/2)
+phi=.5
+step_adjustment=0.5
 step_size=1
 verbose_option=c(FALSE,FALSE)
-stopifnegative=TRUE
-while ((abs(change) > .1*phi) & run_counter <= 100) { #
+stopifnegative=FALSE
+while ((abs(change) > .1*phi) & run_counter <= 1000) { #
   if(!first_run) {start_log_lik=results$log_lik_results} else {input_par=first_input_par; phi_inner=phi}
 
-  #print(input_par)
   results= calc_joint_likelihood(input_par =input_par  #optim_results$par
                                ,mm_mar = mm_mar
                                ,margin_dist = ZISICHEL(
@@ -153,16 +152,25 @@ while ((abs(change) > .1*phi) & run_counter <= 100) { #
   input_par=end_par
   first_run=FALSE
   end_par_matrix=rbind(end_par_matrix,end_par)
-  end_loglik_matrix=rbind(end_loglik_matrix,end_log_lik[["Total"]])
+  end_loglik_matrix=rbind(end_loglik_matrix,end_log_lik)
   run_counter=run_counter+1
   #Showing charts
   colnames(end_par_matrix)=names(end_par)
-  pars=round(sqrt(ncol(end_par_matrix)+1),0)
-  plot.new();par(mfrow=c(pars,pars+1))
+  pars=round(sqrt(ncol(end_par_matrix)+3),0)+1
+  plot.new();par(mfrow=c(pars,pars))
+  
+  true_val=c(0,.7,0,0.3,-1.6,-3,0.8,2.1) #Temporary
+  names(true_val)=colnames(end_par_matrix)
+  
   for (par_name in colnames(end_par_matrix)) {
-    plot(1:nrow(end_par_matrix),end_par_matrix[,par_name],main=par_name)    
+    true=true_val[par_name]
+    actual=end_par_matrix[,par_name]
+    plot(1:nrow(end_par_matrix),actual,main=par_name,ylim=c(min(true-.1,min(actual)-.1),max(true+.1,max(actual)+.1)))   
+    abline(h=true,col="red")
   }
-  plot(1:nrow(end_par_matrix),end_loglik_matrix[,1],main="loglik")
+  plot(1:nrow(end_par_matrix),end_loglik_matrix[,1],main="loglik - margin")
+  plot(1:nrow(end_par_matrix),end_loglik_matrix[,2],main="loglik - copula")
+  plot(1:nrow(end_par_matrix),end_loglik_matrix[,3],main="loglik - total")
   
   if(stopifnegative==TRUE) {
     if(length(end_loglik_matrix)>5) {
@@ -181,7 +189,7 @@ print(results$log_lik_results)
 ###############
 
 #Final SEs
-se_par_input=end_par_matrix[which.max(end_loglik_matrix),] 
+se_par_input=end_par_matrix[which.max(end_loglik_matrix[,"Total"]),] 
 
 final_results= calc_joint_likelihood(input_par =se_par_input
                                ,mm_mar = mm_mar
@@ -207,11 +215,10 @@ new_SE=final_iteration_out$se_par
 old_SE=sqrt(diag(vcov(fitted_margins[[1]])))
 old_SE=c(old_SE,c(fitted_copulas$`1,2`$se,fitted_copulas$`2,3`$se, fitted_copulas$`1,2`$se2,fitted_copulas$`2,3`$se2))
 
-true=c(0.6*1:3,0.3*1:3,-1.6,0.512,0.4,1.1)
-
-z_score_old=(start_par[0:length(old_SE)]-0)/old_SE
-z_score_new=(se_par_input-0)/new_SE
-SEs=cbind(start_par,old_SE,z_score_old,end_par,new_SE,z_score_new,true)
+z_old=(start_par[0:length(old_SE)]-0)/old_SE
+z_new=(se_par_input-0)/new_SE
+SEs=cbind(start_par,old_SE,z_old,end_par,new_SE,z_new,true_val)
+rownames(SEs)=names(true_val)
 print(round(SEs,3))
 
 
