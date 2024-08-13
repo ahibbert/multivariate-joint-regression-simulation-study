@@ -642,7 +642,7 @@ dlogit <- function(x) {
 }
 
 dlog_2plus <- function(x) {
-  return(-1/(x-2))
+  return(1/(x-2))
 }
 
 #Generate the copula model matrix
@@ -677,7 +677,7 @@ generate_cop_model_matrix = function(dataset,theta.formula=formula(~1),zeta.form
 
 calc_joint_likelihood <- function(input_par,mm_mar,margin_dist,copula_dist,return_option="list",copula_link,dataset,mm_cop,verbose=TRUE,calc_d2=FALSE,dFUN=dZISICHEL,pFUN=pZISICHEL)  {
   
-  #return_option="list";input_par=input_par;copula_dist="t";margin_dist = ZISICHEL(mu.link = "log",sigma.link = "log",nu.link = "identity",tau.link = "logit");verbose=TRUE;dFUN=dZISICHEL;pFUN=pZISICHEL;calc_d2=FALSE
+  #return_option="list";input_par=input_par;copula_dist="t";margin_dist = ZISICHEL(mu.link = "log",sigma.link = "log",nu.link = "identity",tau.link = "logit");verbose=TRUE;dFUN=dZISICHEL;pFUN=pZISICHEL;calc_d2=TRUE
   
   #tryCatch(
   #  {
@@ -876,7 +876,7 @@ score_function <- function(eta,dldpar,dpardeta,dlcopdpar,response,phi=1,step_siz
 
 newton_raphson_iteration=function(results,input_par,phi=1,step_size=1,verbose=c(FALSE,FALSE),calc_d2=FALSE) {
   
-  #results=results;input_par=start_par;verbose=c(TRUE,TRUE); calc_d2=TRUE
+  #results=final_results;input_par=end_par_matrix[which.max(end_loglik_matrix),] ;verbose=c(TRUE,TRUE); calc_d2=TRUE
   
   steps_all=list()
   par_out=list()
@@ -956,10 +956,14 @@ newton_raphson_iteration=function(results,input_par,phi=1,step_size=1,verbose=c(
   }
   
   dldpar=results$derivatives_calculated_all_margins[,c("dldm","dldd","dldv","dldt")] #First derivative of log likelihood w.r.t. parameters
-  #d2ldpar=results$derivatives_calculated_all_margins[,c("d2ldm2","d2ldd2","d2ldv2","d2ldt2")] #Quasi newton second derivative of log function w.r.t parameters
+  
+  if (calc_d2==TRUE) {
+    d2ldpar=results$derivatives_calculated_all_margins[,c("d2ldm2","d2ldd2","d2ldv2","d2ldt2")] #Quasi newton second derivative of log function w.r.t parameters
+  }
+  
   dpardeta=results$derivatives_calculated_all_margins[,c("mu.dr","sigma.dr","nu.dr","tau.dr")] #Derivative of inverse link function
   
-  margin_score=score_function(eta=results$eta[,margin_parameters],dldpar=dldpar,dpardeta=dpardeta,dlcopdpar=dlcopdpar_final,response=response_final,phi=phi,step_size=step_size,verbose=verbose[1]) ##Returns updated value
+  margin_score=score_function(eta=results$eta[,margin_parameters],dldpar=dldpar,dpardeta=dpardeta,dlcopdpar=dlcopdpar_final*0,response=response_final,phi=phi,step_size=step_size,verbose=verbose[1]) ##Returns updated value
   
   e_k=margin_score$z_k#-results$eta_nomargin[[1]][,c("mu","sigma","nu","tau")]
   beta_r=list()
@@ -990,21 +994,13 @@ newton_raphson_iteration=function(results,input_par,phi=1,step_size=1,verbose=c(
   names(end_par)=rownames(beta_new)
   end_par=end_par[names(start_par)]
   
+  hess_list_solved=list()
+  
   if (calc_d2==TRUE) {
-    se_par=vector()
-    for (names in c(margin_parameters)) {
-      n=nrow(margin_score$z_k)
-      se_var=(diag(solve(-hess_list[[names]])))
-      #se_var=diag(hess_list[[names]])/n
-      se=sqrt(se_var)#/sqrt(n)
-      se_par=c(se_par,se)
+    for (parameter in names(hess_list)) {
+      hess_list_solved[[parameter]]=diag(sqrt(solve(-hess_list[[parameter]])))
     }
-    for (names in cop_parameter_names) {
-      n=nrow(copula_score$z_k)
-      se_var=(diag(solve(-hess_list[[names]])))
-      se=sqrt(se_var)#/sqrt(n)
-      se_par=c(se_par,se)
-    }
+    se_par=unlist(hess_list_solved)[names(end_par)]
     return_list=list(input_par,end_par,se_par)
     names(return_list)=c("input_par","end_par","se_par")
   } else {
@@ -1036,19 +1032,20 @@ loadDataset <- function(simOption,plot=FALSE) {
     dd <- d*(d-1)/2
     order <- 1:d
     family <- c(2, 2, 0)
-    par <- c(0.2, 0.9, .9)
-    par2 <- c(5,10,7)
+    par <- c(logit_inv(.4), logit_inv(.4), logit_inv(.4))
+    par2 <- c(log_2plus_inv(1.1),log_2plus_inv(1.1),log_2plus_inv(1.1))
+    
     
     # transform to R-vine matrix notation
     RVM <- D2RVine(order, family, par, par2)
     contour(RVM)
     
-    n=200;t=d
+    n=1000;t=d
     copsim=RVineSim(n*t,RVM)
     
     margin=matrix(0,ncol=ncol(copsim),nrow=nrow(copsim))
     for ( i in 1:ncol(copsim)) {
-      margin[,i]=qZISICHEL(copsim[,i],mu=i*5,sigma=i*2,nu=-1.6,tau=0.05)
+      margin[,i]=qZISICHEL(copsim[,i],mu=exp(0.7*i),sigma=exp(0.3*i),nu=-1.6,tau=0.05)#Update to i*mu/sigma as needed
     }
     
     response = as.data.frame(margin)

@@ -12,14 +12,14 @@ library(VineCopula)
 simOption=2
 
 #### 0. Load RAND data subset and transform to standard longitudinal dataset #######
-loadDataset(simOption)
+dataset=loadDataset(simOption)
 
 #### INPUT: Parameters ####
 
 #Formulas
 
-mu.formula = formula("response ~ 1")#mu.formula = formula("response ~ as.factor(time)+as.factor(gender)+age")
-sigma.formula = formula("~ 1")#sigma.formula = formula("~ as.factor(time)+age")
+mu.formula = formula("response ~ as.factor(time)")#mu.formula = formula("response ~ as.factor(time)+as.factor(gender)+age")
+sigma.formula = formula("~ as.factor(time)")#sigma.formula = formula("~ as.factor(time)+age")
 nu.formula = formula("~ 1")#nu.formula = formula("~ as.factor(time)+as.factor(gender)")
 tau.formula = formula("~ 1")#tau.formula = formula("~ age")
 theta.formula=formula("response~1")#theta.formula=formula("response~as.factor(gender)")
@@ -32,6 +32,7 @@ margin_dist = ZISICHEL(
   nu.link = "identity",
   tau.link = "logit"
 )
+
 dFUN=dZISICHEL;pFUN=pZISICHEL
 copula_dist="t"
 copula_link=list(logit,logit_inv,log_2plus,log_2plus_inv,dlogit,dlog_2plus)
@@ -131,7 +132,7 @@ while ((abs(change) > .1*phi) & run_counter <= 100) { #
                                )
                                , copula_dist="t"
                                , copula_link=copula_link
-                               ,mm_cop = mm_cop
+                               , mm_cop = mm_cop
                                , return_option="list"
                                , dataset=dataset
                                , verbose=FALSE
@@ -179,7 +180,10 @@ print(results$log_lik_results)
 
 ###############
 
-final_results= calc_joint_likelihood(input_par =end_par_matrix[which.max(end_loglik_matrix),] 
+#Final SEs
+se_par_input=end_par_matrix[which.max(end_loglik_matrix),] 
+
+final_results= calc_joint_likelihood(input_par =se_par_input
                                ,mm_mar = mm_mar
                                ,margin_dist = ZISICHEL(
                                  mu.link = "log",
@@ -189,7 +193,7 @@ final_results= calc_joint_likelihood(input_par =end_par_matrix[which.max(end_log
                                )
                                , copula_dist="t"
                                , copula_link=copula_link
-                               ,mm_cop = mm_cop
+                               , mm_cop = mm_cop
                                , return_option="list"
                                , dataset=dataset
                                , verbose=FALSE
@@ -197,16 +201,21 @@ final_results= calc_joint_likelihood(input_par =end_par_matrix[which.max(end_log
 )
 
 
-final_iteration_out=newton_raphson_iteration(final_results,end_par,phi=phi_inner,step_size=step_size,verbose=verbose_option,calc_d2=TRUE)
+final_iteration_out=newton_raphson_iteration(final_results,se_par_input,phi=phi_inner,step_size=step_size,verbose=verbose_option,calc_d2=TRUE)
 
 new_SE=final_iteration_out$se_par
 old_SE=sqrt(diag(vcov(fitted_margins[[1]])))
 old_SE=c(old_SE,c(fitted_copulas$`1,2`$se,fitted_copulas$`2,3`$se, fitted_copulas$`1,2`$se2,fitted_copulas$`2,3`$se2))
 
+true=c(0.6*1:3,0.3*1:3,-1.6,0.512,0.4,1.1)
+
 z_score_old=(start_par[0:length(old_SE)]-0)/old_SE
-z_score_new=(end_par-0)/new_SE
-SEs=cbind(start_par,old_SE,z_score_old,end_par,new_SE,z_score_new)
+z_score_new=(se_par_input-0)/new_SE
+SEs=cbind(start_par,old_SE,z_score_old,end_par,new_SE,z_score_new,true)
 print(round(SEs,3))
+
+
+
 
 
 
