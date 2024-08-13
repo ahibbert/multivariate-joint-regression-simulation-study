@@ -1010,7 +1010,7 @@ newton_raphson_iteration=function(results,input_par,phi=1,step_size=1,verbose=c(
   return(return_list)
 }
 
-loadDataset <- function(simOption,plot=FALSE,n=100) {
+loadDataset <- function(simOption,plot_dist=FALSE,n=100) {
 
   if (simOption==1) {
     load("Data/rand_mvt.rds")
@@ -1026,6 +1026,7 @@ loadDataset <- function(simOption,plot=FALSE,n=100) {
     # Setup data as longitudinal file
     dataset<-create_longitudinal_dataset(response,covariates,labels=c("subject","time","response","age","year","gender"))
   } else if (simOption==2) {
+
     # set up D-vine copula model with mixed pair-copulas
     d <- 3
     dd <- d*(d-1)/2
@@ -1034,7 +1035,6 @@ loadDataset <- function(simOption,plot=FALSE,n=100) {
     par <- c(logit_inv(.8), logit_inv(.8), logit_inv(.8))
     par2 <- c(log_2plus_inv(2.1),log_2plus_inv(2.1),log_2plus_inv(2.1))
     
-    
     # transform to R-vine matrix notation
     RVM <- D2RVine(order, family, par, par2)
     contour(RVM)
@@ -1042,20 +1042,70 @@ loadDataset <- function(simOption,plot=FALSE,n=100) {
     t=d
     copsim=RVineSim(n*t,RVM)
     
-    margin=matrix(0,ncol=ncol(copsim),nrow=nrow(copsim))
-    for ( i in 1:ncol(copsim)) {
-      margin[,i]=qZISICHEL(copsim[,i],mu=exp(0.7*i),sigma=exp(0.3*i),nu=-1.6,tau=0.05)#Update to i*mu/sigma as needed
-    }
-    
-    response = as.data.frame(margin)
     covariates=list()
     covariates[[1]] = as.data.frame(round(runif(n,0,100),0)) #Age
     covariates[[2]] = t(t(matrix(1,ncol=t,nrow=n))*(1:t)) #Time
     covariates[[3]] = as.data.frame(round(runif(n,0,1),0)) #Gender
     
+    margin=matrix(0,ncol=ncol(copsim),nrow=nrow(copsim))
+    for ( i in 1:ncol(copsim)) {
+      margin[covariates[[3]]==0,i]=qZISICHEL(copsim[,i],mu=exp(0.3+0.2*i),sigma=exp(0.3+0.2*i),nu=-0.8,tau=0.05)[covariates[[3]]==0]#Update to i*mu/sigma as needed
+      margin[covariates[[3]]==1,i]=qZISICHEL(copsim[,i],mu=exp(0.3+0.2*i+0.1),sigma=exp(0.3+0.2*i+0.1),nu=-0.8,tau=0.05)[covariates[[3]]==1]#Update to i*mu/sigma as needed
+    }
+    
+    response = as.data.frame(margin)
+    
     dataset<-create_longitudinal_dataset(response,covariates,labels=c("subject","time","response","age","year","gender"))
     
   }
-  if(plot==TRUE) {plotDist(dataset,"ZISICHEL")}
+  if(plot_dist==TRUE) {plotDist(dataset,"ZISICHEL")}
   return(dataset)
 }
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

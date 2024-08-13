@@ -9,17 +9,18 @@ set.seed(1000);options(scipen=999);
 source("common_functions.R")
 library(gamlss)
 library(VineCopula)
-simOption=2
 
 #### 0. Load RAND data subset and transform to standard longitudinal dataset #######
-dataset=loadDataset(simOption,n=1000)
+dataset=loadDataset(simOption=2,plot_dist=FALSE,n=2000)
 
-#### INPUT: Parameters ####
+###########################
+####### USER INPUT ########
+###########################
 
 #Formulas
 
-mu.formula = formula("response ~ time")#mu.formula = formula("response ~ as.factor(time)+as.factor(gender)+age")
-sigma.formula = formula("~ time")#sigma.formula = formula("~ as.factor(time)+age")
+mu.formula = formula("response ~ time+as.factor(gender)")#mu.formula = formula("response ~ as.factor(time)+as.factor(gender)+age")
+sigma.formula = formula("~ time+as.factor(gender)")#sigma.formula = formula("~ as.factor(time)+age")
 nu.formula = formula("~ 1")#nu.formula = formula("~ as.factor(time)+as.factor(gender)")
 tau.formula = formula("~ 1")#tau.formula = formula("~ age")
 theta.formula=formula("response~1")#theta.formula=formula("response~as.factor(gender)")
@@ -117,7 +118,7 @@ phi=.5
 step_adjustment=0.5
 step_size=1
 verbose_option=c(FALSE,FALSE)
-stopifnegative=FALSE
+stopifnegative=TRUE
 while ((abs(change) > .1*phi) & run_counter <= 1000) { #
   if(!first_run) {start_log_lik=results$log_lik_results} else {input_par=first_input_par; phi_inner=phi}
 
@@ -159,7 +160,7 @@ while ((abs(change) > .1*phi) & run_counter <= 1000) { #
   pars=round(sqrt(ncol(end_par_matrix)+3),0)+1
   plot.new();par(mfrow=c(pars,pars))
   
-  true_val=c(0,.7,0,0.3,-1.6,-3,0.8,2.1) #Temporary
+  true_val=c(0.3,0.2,0.1,0.3,0.1,0.2,-0.8,-3,0.8,2.1) #Temporary
   names(true_val)=colnames(end_par_matrix)
   
   for (par_name in colnames(end_par_matrix)) {
@@ -184,7 +185,7 @@ while ((abs(change) > .1*phi) & run_counter <= 1000) { #
 print("Separate likelihood")
 print(results_start$log_lik_results)
 print("Joint likelihood")
-print(results$log_lik_results)
+print(end_loglik_matrix[which.max(end_loglik_matrix[,"Total"]),] )
 
 ###############
 
@@ -222,13 +223,26 @@ rownames(SEs)=names(true_val)
 print(round(SEs,3))
 
 
+########ADD GAMLSS GLMM COMPARISON
+gamlss_glmm_model <- gamlss(formula = formula("response ~ time+as.factor(gender)+random(as.factor(subject))")
+                       , sigma.formula = sigma.formula
+                       , nu.formula = nu.formula
+                       , tau.formula = tau.formula
+                       , family=margin_dist
+                       , data=dataset,method=RS(5))
 
+gamlss_coeffs=vector()
+for (name in c("mu","sigma","nu",'tau')) {
+  gamlss_coeffs=c(gamlss_coeffs,coef(gamlss_glmm_model,what=name))
+}
 
+gamlss_vcov=sqrt(diag(vcov(gamlss_glmm_model)))
+gamlss_coeffs=gamlss_coeffs[!grepl("random",names(gamlss_coeffs))]
 
+SEs_plus_gamlss=cbind(SEs,cbind(c(gamlss_coeffs,rep(NA,nrow(SEs)-length(gamlss_coeffs))),c(gamlss_vcov,rep(NA,nrow(SEs)-length(gamlss_coeffs)))))
 
-
-
-
+colnames(SEs_plus_gamlss)=c("Start Par","Old SE","Z Old","End Par","New SE","Z New","True Val","GAMLSS Coeff","GAMLSS SE")
+print(round(SEs_plus_gamlss,3))
 
 
 
