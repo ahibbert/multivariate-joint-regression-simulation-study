@@ -753,6 +753,7 @@ results_start= calc_joint_likelihood(input_par =start_par  #optim_results$par
                                      , return_option="list"
                                      , dataset=dataset
                                      , verbose=FALSE
+                                     , calc_d2=TRUE #For ease of debugging - turn off for later versions
 )
 
 print(results_start$log_lik_results)
