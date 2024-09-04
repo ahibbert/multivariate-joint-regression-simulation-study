@@ -764,11 +764,15 @@ calc_joint_likelihood <- function(input_par,mm_mar,margin_dist,copula_dist,retur
       if(i!=1) {
         #if(i==num_margins){margin_p_cop_input_u1=rbind(margin_p_cop_input_u1,cbind(zero_mat_n,zero_mat_n))}
         margin_p_cop_input_u2=rbind(margin_p_cop_input_u2,cbind(margin_p[dataset$time == margin_names[i-1]],margin_p[dataset$time == margin_names[i]]))
+        margin_p_cop_input_u2[margin_p_cop_input_u2>1]=1
+        margin_p_cop_input_u2[margin_p_cop_input_u2<0]=0
         order_copula=rbind(order_copula,cbind(dataset[dataset$time == margin_names[i-1],c("time","subject")],dataset[dataset$time == margin_names[i],c("time","subject")]))
       }
       if(i!=num_margins) {
         #if(i==1) { margin_p_cop_input_u2=rbind(margin_p_cop_input_u2,cbind(zero_mat_n,zero_mat_n))}
         margin_p_cop_input_u1=rbind(margin_p_cop_input_u1,cbind(margin_p[dataset$time == margin_names[i]],margin_p[dataset$time == margin_names[i+1]]))
+        margin_p_cop_input_u1[margin_p_cop_input_u1>1]=1
+        margin_p_cop_input_u1[margin_p_cop_input_u1<0]=0
         order_copula_u2=rbind(order_copula_u2,cbind(dataset[dataset$time == margin_names[i],c("time","subject")],dataset[dataset$time == margin_names[i+1],c("time","subject")]))
       }
       
@@ -795,11 +799,17 @@ calc_joint_likelihood <- function(input_par,mm_mar,margin_dist,copula_dist,retur
       if(i!=1) {
         #if(i==num_margins){margin_p_cop_input_u1=rbind(margin_p_cop_input_u1,cbind(zero_mat_n,zero_mat_n))}
         margin_p_cop_input_u2=rbind(margin_p_cop_input_u2,cbind(margin_p[dataset$time == margin_names[i-1]],margin_p[dataset$time == margin_names[i]]))
+        
+        margin_p_cop_input_u2[margin_p_cop_input_u2>1]=1
+        margin_p_cop_input_u2[margin_p_cop_input_u2<0]=0
+        
         order_copula=rbind(order_copula,cbind(dataset[dataset$time == margin_names[i-1],c("time","subject")],dataset[dataset$time == margin_names[i],c("time","subject")]))
       }
       if(i!=num_margins) {
         #if(i==1) { margin_p_cop_input_u2=rbind(margin_p_cop_input_u2,cbind(zero_mat_n,zero_mat_n))}
         margin_p_cop_input_u1=rbind(margin_p_cop_input_u1,cbind(margin_p[dataset$time == margin_names[i]],margin_p[dataset$time == margin_names[i+1]]))
+        margin_p_cop_input_u1[margin_p_cop_input_u1>1]=1
+        margin_p_cop_input_u1[margin_p_cop_input_u1<0]=0
         order_copula_u2=rbind(order_copula_u2,cbind(dataset[dataset$time == margin_names[i],c("time","subject")],dataset[dataset$time == margin_names[i+1],c("time","subject")]))
       }
       
@@ -813,45 +823,45 @@ calc_joint_likelihood <- function(input_par,mm_mar,margin_dist,copula_dist,retur
   }
   num_dlcopdpar_nolog=(fx_eps[[2]]-fx_eps[[1]])/(2*eps_ch)
   
-  ###OK for dcdu1 and dcdu2
-  fx_eps=list(); count=1; eps_ch=.00001
-  for (eps in -eps_ch + 0:1*eps_ch*2) {
-    
-    args=names(input_list)[names(input_list)%in%formalArgs(pFUN)]
-    #input_list$mu = input_list$mu+eps
-    margin_p = do.call(pFUN,args=input_list[args])
-    
-    margin_p_cop_input=matrix(ncol=2,nrow=0)
-    order_copula=matrix(ncol=4,nrow=0)
-    for (i in 1:(num_margins-1)) {
-      margin_p_cop_input=rbind(margin_p_cop_input,cbind(margin_p[dataset$time == margin_names[i]],margin_p[dataset$time == margin_names[i+1]]))
-      order_copula=rbind(order_copula,cbind(dataset[dataset$time == margin_names[i],c("time","subject")],dataset[dataset$time == margin_names[i+1],c("time","subject")]))
-    }
-    names(order_copula)=c("time1","subject1","time2","subject2")
-    fx_eps[[count]]=(BiCopPDF(  margin_p_cop_input[,1]+eps,margin_p_cop_input[,2],family = as.numeric(BiCopName(copula_dist)),par=eta_cop_link_inv[,"theta"],par2=if(two_par_cop){eta_cop_link_inv[,"zeta"]}else{eta_cop_link_inv[,"theta"]*0}))
-    count=count+1
-  }
-  num_dcdu1=(fx_eps[[2]]-fx_eps[[1]])/(2*eps_ch)
-  
-  ###OK for dcdu1 and dcdu2
-  fx_eps=list(); count=1; eps_ch=.00001
-  for (eps in -eps_ch + 0:1*eps_ch*2) {
-    
-    args=names(input_list)[names(input_list)%in%formalArgs(pFUN)]
-    #input_list$mu = input_list$mu+eps
-    margin_p = do.call(pFUN,args=input_list[args])
-    
-    margin_p_cop_input=matrix(ncol=2,nrow=0)
-    order_copula=matrix(ncol=4,nrow=0)
-    for (i in 1:(num_margins-1)) {
-      margin_p_cop_input=rbind(margin_p_cop_input,cbind(margin_p[dataset$time == margin_names[i]],margin_p[dataset$time == margin_names[i+1]]))
-      order_copula=rbind(order_copula,cbind(dataset[dataset$time == margin_names[i],c("time","subject")],dataset[dataset$time == margin_names[i+1],c("time","subject")]))
-    }
-    names(order_copula)=c("time1","subject1","time2","subject2")
-    fx_eps[[count]]=(BiCopPDF(  margin_p_cop_input[,1],margin_p_cop_input[,2]+eps,family = as.numeric(BiCopName(copula_dist)),par=eta_cop_link_inv[,"theta"],par2=if(two_par_cop){eta_cop_link_inv[,"zeta"]}else{eta_cop_link_inv[,"theta"]*0}))
-    count=count+1
-  }
-  num_dcdu2=(fx_eps[[2]]-fx_eps[[1]])/(2*eps_ch)
+  # ###OK for dcdu1 and dcdu2
+  # fx_eps=list(); count=1; eps_ch=.00001
+  # for (eps in -eps_ch + 0:1*eps_ch*2) {
+  #   
+  #   args=names(input_list)[names(input_list)%in%formalArgs(pFUN)]
+  #   #input_list$mu = input_list$mu+eps
+  #   margin_p = do.call(pFUN,args=input_list[args])
+  #   
+  #   margin_p_cop_input=matrix(ncol=2,nrow=0)
+  #   order_copula=matrix(ncol=4,nrow=0)
+  #   for (i in 1:(num_margins-1)) {
+  #     margin_p_cop_input=rbind(margin_p_cop_input,cbind(margin_p[dataset$time == margin_names[i]],margin_p[dataset$time == margin_names[i+1]]))
+  #     order_copula=rbind(order_copula,cbind(dataset[dataset$time == margin_names[i],c("time","subject")],dataset[dataset$time == margin_names[i+1],c("time","subject")]))
+  #   }
+  #   names(order_copula)=c("time1","subject1","time2","subject2")
+  #   fx_eps[[count]]=(BiCopPDF(  margin_p_cop_input[,1]+eps,margin_p_cop_input[,2],family = as.numeric(BiCopName(copula_dist)),par=eta_cop_link_inv[,"theta"],par2=if(two_par_cop){eta_cop_link_inv[,"zeta"]}else{eta_cop_link_inv[,"theta"]*0}))
+  #   count=count+1
+  # }
+  # num_dcdu1=(fx_eps[[2]]-fx_eps[[1]])/(2*eps_ch)
+  # 
+  # ###OK for dcdu1 and dcdu2
+  # fx_eps=list(); count=1; eps_ch=.00001
+  # for (eps in -eps_ch + 0:1*eps_ch*2) {
+  #   
+  #   args=names(input_list)[names(input_list)%in%formalArgs(pFUN)]
+  #   #input_list$mu = input_list$mu+eps
+  #   margin_p = do.call(pFUN,args=input_list[args])
+  #   
+  #   margin_p_cop_input=matrix(ncol=2,nrow=0)
+  #   order_copula=matrix(ncol=4,nrow=0)
+  #   for (i in 1:(num_margins-1)) {
+  #     margin_p_cop_input=rbind(margin_p_cop_input,cbind(margin_p[dataset$time == margin_names[i]],margin_p[dataset$time == margin_names[i+1]]))
+  #     order_copula=rbind(order_copula,cbind(dataset[dataset$time == margin_names[i],c("time","subject")],dataset[dataset$time == margin_names[i+1],c("time","subject")]))
+  #   }
+  #   names(order_copula)=c("time1","subject1","time2","subject2")
+  #   fx_eps[[count]]=(BiCopPDF(  margin_p_cop_input[,1],margin_p_cop_input[,2]+eps,family = as.numeric(BiCopName(copula_dist)),par=eta_cop_link_inv[,"theta"],par2=if(two_par_cop){eta_cop_link_inv[,"zeta"]}else{eta_cop_link_inv[,"theta"]*0}))
+  #   count=count+1
+  # }
+  # num_dcdu2=(fx_eps[[2]]-fx_eps[[1]])/(2*eps_ch)
   
   #########################
   
@@ -971,8 +981,8 @@ calc_joint_likelihood <- function(input_par,mm_mar,margin_dist,copula_dist,retur
     names(derivatives_copula)=c("dldth","dcdu1","dcdu2","dthdeta")
   }
   
-  return_list=list(log_lik_results,response,margin_d,margin_p,copula_d, order_copula,derivatives_copula,margin_dist,copula_dist,eta,eta_linkinv,derivatives_calculated_all_margins,mm_mar,input_par,eta_cop,eta_cop_link_inv,mm_cop,num_dlcopdpar,num_dlcopdpar_nolog,num_dcdu1,num_dcdu2)
-  names(return_list)=c("log_lik_results","response","margin_d","margin_p","copula_d","order_copula","derivatives_copula","margin_dist","copula_dist","eta","eta_linkinv","derivatives_calculated_all_margins","mm_mar","input_par","eta_cop","eta_cop_link_inv","mm_cop","num_dlcopdpar","num_dlcopdpar_nolog","num_dcdu1","num_dcdu2")
+  return_list=list(log_lik_results,response,margin_d,margin_p,copula_d, order_copula,derivatives_copula,margin_dist,copula_dist,eta,eta_linkinv,derivatives_calculated_all_margins,mm_mar,input_par,eta_cop,eta_cop_link_inv,mm_cop,num_dlcopdpar,num_dlcopdpar_nolog)
+  names(return_list)=c("log_lik_results","response","margin_d","margin_p","copula_d","order_copula","derivatives_copula","margin_dist","copula_dist","eta","eta_linkinv","derivatives_calculated_all_margins","mm_mar","input_par","eta_cop","eta_cop_link_inv","mm_cop","num_dlcopdpar","num_dlcopdpar_nolog")
   
   if (return_option == "list") {
     if (verbose==TRUE) {
@@ -1306,11 +1316,11 @@ newton_raphson_iteration=function(results,input_par,phi=1,step_size=1,verbose=c(
   }
   dlcopdpar[is.na(dlcopdpar)]=0
   
-  plot.new()
-  par(mfrow=c(3,3))
-  plot(num_deriv,dlcopdpar,main="dlcopdpar",xlim=range(num_deriv),ylim=range(num_deriv))
-  plot(num_deriv[dcdu_tplus==0],dlcopdpar[dcdu_tplus==0],main="dlcopdpar - when dcdu_tplus is zero",xlim=range(num_deriv),ylim=range(num_deriv))
-  plot(num_deriv[dcdu_tminus==0],dlcopdpar[dcdu_tminus==0],main="dlcopdpar - when dcdu_tminus is zero",xlim=range(num_deriv),ylim=range(num_deriv))
+  #plot.new()
+  #par(mfrow=c(3,3))
+  #plot(num_deriv,dlcopdpar,main="dlcopdpar",xlim=range(num_deriv),ylim=range(num_deriv))
+  #plot(num_deriv[dcdu_tplus==0],dlcopdpar[dcdu_tplus==0],main="dlcopdpar - when dcdu_tplus is zero",xlim=range(num_deriv),ylim=range(num_deriv))
+  #plot(num_deriv[dcdu_tminus==0],dlcopdpar[dcdu_tminus==0],main="dlcopdpar - when dcdu_tminus is zero",xlim=range(num_deriv),ylim=range(num_deriv))
   #plot(num_deriv_nolog[(dcdu_tminus)==0],(dcdu_tplus*c_tplus)[(dcdu_tminus)==0],main="dcopdpar - when dcdu2 is zero",xlim=range(num_deriv_nolog),ylim=range(num_deriv_nolog))
   #plot(num_deriv_nolog[(dcdu_tplus)==0],(dcdu_tminus*c_tminus)[(dcdu_tplus)==0],main="dcopdpar - when dcdu1 is zero",xlim=range(num_deriv_nolog),ylim=range(num_deriv_nolog))
   #plot(results$num_dcdu1,dcdu_tplus[dcdu_tplus!=0],main="dcdu1")

@@ -17,7 +17,7 @@ true_val_matrix=matrix(nrow=0,ncol=4)
 for (a in c(3)) {
   for (b in c(1)) {
     for (c in c(1)) {
-      for (d in c(1:5)) { #-5:15*.1
+      for (d in c(-10:10*.1)) { #-5:15*.1
         true_val_matrix=rbind(true_val_matrix,matrix(c(a,b,c,d),ncol=4,byrow=TRUE))
       }}}}
 
@@ -36,7 +36,7 @@ for (run_counter in 1:nrow(true_val_matrix)) {
   
   dataset=loadDataset(simOption=3
                       ,plot_dist=FALSE
-                      ,n=100
+                      ,n=500
                       ,d=3
                       ,copula.family=BiCopName("C")
                       ,copula.link=copula.link
@@ -81,15 +81,16 @@ for (run_counter in 1:nrow(true_val_matrix)) {
       verbose=FALSE,
       calc_d2=TRUE,
       phi=.5,
-      step_size=.5,
+      step_size=1,
       step_adjustment=.5,
-      step_reduc_count=5,
+      step_reduc_count=3,
       crit_wk=0.0000001,
       true_val=true_val,
       stopifnegative=TRUE,
       stopval=.1,
       max_runs=100,
-      plot_optim=TRUE
+      plot_optim=TRUE,
+      plot_end_only=FALSE
   )
   
   post_optim=GJRM_POST_OPTIM(optim,setup,dataset)
