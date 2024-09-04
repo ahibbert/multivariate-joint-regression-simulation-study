@@ -1730,7 +1730,7 @@ GJRM_L_OPTIM <- function(
         if(all(end_loglik_matrix[(length(end_loglik_matrix)-3):(length(end_loglik_matrix)-1)]-end_loglik_matrix[(length(end_loglik_matrix)-2):length(end_loglik_matrix)]>0))
           {converged_status="Negative";break}
       }
-      if((change/end_log_lik["Total"])< -0.1) {converged_status="Negative";break}
+      if((change/end_log_lik["Total"])< -0.05) {converged_status="Negative";break}
     }
     
     if(abs(change) <= stopval) {converged_status="Converged"} else {converged_status="Not Converged"}
