@@ -14,10 +14,10 @@ SEs_ALL=list()
 se_count=1
 
 true_val_matrix=matrix(nrow=0,ncol=4)
-for (a in c(1)) {
+for (a in c(3)) {
   for (b in c(1)) {
     for (c in c(1)) {
-      for (d in -5:15*.1) {
+      for (d in c(1:5)) { #-5:15*.1
         true_val_matrix=rbind(true_val_matrix,matrix(c(a,b,c,d),ncol=4,byrow=TRUE))
       }}}}
 
@@ -83,11 +83,11 @@ for (run_counter in 1:nrow(true_val_matrix)) {
       phi=.5,
       step_size=.5,
       step_adjustment=.5,
-      step_reduc_count=2,
+      step_reduc_count=5,
       crit_wk=0.0000001,
       true_val=true_val,
       stopifnegative=TRUE,
-      stopval=.01,
+      stopval=.1,
       max_runs=100,
       plot_optim=TRUE
   )
@@ -115,6 +115,12 @@ for (run_counter in 1:nrow(true_val_matrix)) {
 }
 
 
+
+
+
+
+#################### POST RUN ANALYSIS #################
+
 rownames(SEs_ALL[[1]]["SE"])
 
 parameter_estimates=list()
@@ -129,41 +135,45 @@ for (run in 1:length(SEs_ALL)) {
   logliks[run,]=c(SEs_ALL[[run]]$LogLik[1,3],SEs_ALL[[run]]$LogLik[nrow(SEs_ALL[[run]]$LogLik),3])
 }
 
+conv=matrix(ncol=1,nrow=length(SEs_ALL))
+for (run in 1:length(SEs_ALL)) {
+  conv[run,]=c(SEs_ALL[[run]]$Converged)
+}
+
 plot.new(); par(mfrow=c(1,1))
 lm_fit=lm(logliks[,2]~logliks[,1])
 plot(logliks[,1],logliks[,2],main=paste("Log Likelihoods, intercept: ", lm_fit$coefficients[1], " gradient: ",lm_fit$coefficients[2] ,sep=""))
 abline(a=lm_fit[1],b=lm_fit[2],col="red")
 
-
 plot.new()
 par(mfrow=c(4,2))
 for (parameter in names(parameter_estimates)) {
   JointReg=parameter_estimates[[parameter]][,"End Par"]
-  SepReg=parameter_estimates[[parameter]][,"Start Par"]
+  #SepReg=parameter_estimates[[parameter]][,"Start Par"]
   True=parameter_estimates[[parameter]][,"True Val"]
   JointConvStatus=parameter_estimates[[parameter]][,8]
-  plot(True,SepReg,main=paste(parameter," Start",sep=""))
-  lm_fit=lm(SepReg~as.numeric(True))$coefficients
-  lm_fit[is.na(lm_fit)]=0
-  abline(a=lm_fit[1],b=lm_fit[2],col="red")
-  plot(True,JointReg,main=paste(parameter," Joint",sep=""))
+  #plot(True,SepReg,main=paste(parameter," Start",sep=""))
+  #lm_fit=lm(SepReg~as.numeric(True))$coefficients
+  #lm_fit[is.na(lm_fit)]=0
+  #abline(a=lm_fit[1],b=lm_fit[2],col="red")
+  plot(True,JointReg,main=paste(parameter," Joint",sep=""),col=ifelse(conv=="Converged","black","red"))
   lm_fit=lm(JointReg~as.numeric(True))$coefficients
   lm_fit[is.na(lm_fit)]=0
   abline(a=lm_fit[1],b=lm_fit[2],col="red")
 }
 
-plot.new()
-par(mfrow=c(4,2))
+#plot.new()
+#par(mfrow=c(4,2))
 for (parameter in names(parameter_estimates)) {
-  JointReg=parameter_estimates[[parameter]][,"Old SE"]
-  SepReg=parameter_estimates[[parameter]][,"New SE"]
+  JointReg=parameter_estimates[[parameter]][,"New SE"]
+  #SepReg=parameter_estimates[[parameter]][,"Old SE"]
   True=parameter_estimates[[parameter]][,"True Val"]
   JointConvStatus=parameter_estimates[[parameter]][,8]
-  plot(True,SepReg,main=paste(parameter," Start",sep=""))
+  #plot(True,SepReg,main=paste(parameter," Start",sep=""))
   #lm_fit=lm(SepReg~as.numeric(True))$coefficients
   #lm_fit[is.na(lm_fit)]=0
   #abline(a=lm_fit[1],b=lm_fit[2],col="red")
-  plot(True,JointReg,main=paste(parameter," Joint",sep=""))
+  plot(True,JointReg,main=paste(parameter," Joint",sep=""),col=ifelse(conv=="Converged","black","red"))
   #lm_fit=lm(JointReg~as.numeric(True))$coefficients
   #lm_fit[is.na(lm_fit)]=0
   #abline(a=lm_fit[1],b=lm_fit[2],col="red")
