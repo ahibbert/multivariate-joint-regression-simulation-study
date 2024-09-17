@@ -14,10 +14,10 @@ SEs_ALL=list()
 se_count=1
 
 true_val_matrix=matrix(nrow=0,ncol=4)
-for (a in c(1:5)) {
-  for (b in c(1:5)) {
-    for (c in c(1:5)) {
-      for (d in c(-5:10*.5)) { #-5:15*.1
+for (a in c(1:3)) {
+  for (b in c(1:3)) {
+    for (c in c(1:3)) {
+      for (d in c(-3:3*.5)) { #-5:15*.1
         true_val_matrix=rbind(true_val_matrix,matrix(c(a,b,c,d),ncol=4,byrow=TRUE))
       }}}}
 
@@ -32,7 +32,7 @@ for (run_counter in 1:nrow(true_val_matrix)) {
   if(two_par_cop) {
     names(copula.link)=c("theta.linkfun","theta.linkinv","dthdeta","zeta.linkfun","zeta.linkinv","dzdeta")} else {names(copula.link)=c("theta.linkfun","theta.linkinv","dthdeta")}
   #true_val=c(.3,.2,.1,.3,.2,.1,-0.8,-2.197,.6,.2)
-  #true_val=c(4,1,1,1)
+  #true_val=c(1,1,1,3)
   
   dataset=loadDataset(simOption=3
                       ,plot_dist=FALSE
@@ -63,7 +63,7 @@ for (run_counter in 1:nrow(true_val_matrix)) {
     dFUN=dEXP,pFUN=pEXP,
     copula.family="C",
     copula.link=copula.link,
-    start="nofit",
+    start="fit",
     calc_results=TRUE
   )
   
@@ -83,14 +83,14 @@ for (run_counter in 1:nrow(true_val_matrix)) {
       phi=.5,
       step_size=1,
       step_adjustment=.5,
-      step_reduc_count=3,
+      step_reduc_count=5,
       crit_wk=0.0000001,
       true_val=true_val,
-      stopifnegative=TRUE,
-      stopval=.1,
+      stopifnegative=FALSE,
+      stopval=.01,
       max_runs=100,
       plot_optim=TRUE,
-      plot_end_only=FALSE
+      plot_end_only=TRUE
   )
   
   post_optim=GJRM_POST_OPTIM(optim,setup,dataset)
@@ -115,11 +115,6 @@ for (run_counter in 1:nrow(true_val_matrix)) {
   se_count=se_count+1
 }
 
-
-
-
-
-
 #################### POST RUN ANALYSIS #################
 
 rownames(SEs_ALL[[1]]["SE"])
@@ -141,9 +136,14 @@ for (run in 1:length(SEs_ALL)) {
   conv[run,]=c(SEs_ALL[[run]]$Converged)
 }
 
+logliks=logliks[conv!="Extreme Value",]
+for (parameter in rownames(SEs_ALL[[run]]$SE)) {
+  parameter_estimates[[parameter]]=parameter_estimates[[parameter]][conv!="Extreme Value",]
+}
+
 plot.new(); par(mfrow=c(1,1))
 lm_fit=lm(logliks[,2]~logliks[,1])
-plot(logliks[,1],logliks[,2],main=paste("Log Likelihoods, intercept: ", lm_fit$coefficients[1], " gradient: ",lm_fit$coefficients[2] ,sep=""),xlim=range(c(logliks[,1],logliks[,2])),ylim=range(c(logliks[,1],logliks[,2])))
+plot(logliks[,1],logliks[,2],main=paste("Log Likelihoods, intercept: ", lm_fit$coefficients[1], " gradient: ",lm_fit$coefficients[2] ,sep=""),xlab="Starting Fit",ylab="Joint Regression")
 abline(a=0,b=1,col="red")
 
 plot.new()
