@@ -1,10 +1,137 @@
 ###########NEW SIMPLIFIED FUNCTIONS
 
+
+get_starting_values = function(copula_dist,margin_dist,dataset) {
+  
+  require("moments")
+  
+  margin_names=unique(dataset$time)
+  num_margins=length(margin_names)
+  
+  cop_par=BiCopTau2Par(family=as.numeric(BiCopName(copula_dist))
+                       ,tau=cor(dataset[dataset$time%in%(margin_names[1:(num_margins-1)]),"response"]
+                                ,dataset[dataset$time%in%(margin_names[2:(num_margins)]),"response"],method="kendall"))
+  names(cop_par)=get_copula_dist(copula_dist)$parameters
+  
+  if(margin_dist$family[1]=="GA") {
+    margin_par=c(
+      mean(dataset$response)
+      , sd(dataset$response)/mean(dataset$response)
+      , skewness(dataset$response)
+      , kurtosis(dataset$response)
+    )
+  } else if (margin_dist$family[1]=="ST1") {
+    margin_par=c(
+      mean(dataset$response)
+      , sd(dataset$response)
+      , skewness(dataset$response)
+      , kurtosis(dataset$response)
+    )
+  } else if (margin_dist$family[1]=="NO") {
+    margin_par=c(
+      mean(dataset$response)
+      , sd(dataset$response)
+    )
+  } else if (margin_dist$family[1]=="ZISICHEL") {
+    margin_par=c(
+      mean(dataset$response)
+      , sd(dataset$response)
+      , skewness(dataset$response)
+      , kurtosis(dataset$response)
+      , mean(dataset$response==0)
+    )
+  }
+
+
+  names(margin_par)=names(margin_dist$parameters)
+  margin_par=margin_par[!is.na(names(margin_par))]
+  
+  return(c(margin_par,cop_par))
+}
+
+
+fit_jointreg_nocov <- function(input_par,margin_dist,copula_dist,data
+                               , use_dlcopdpar=TRUE, verbose=TRUE, plot_results=TRUE
+                               , crit_lik_change=0.05, start_step_size=.5, step_adjustment=.9, max_steps=5
+                               , true_val = NA) {
+  
+  log_lik_history=matrix(ncol=3+2,nrow=0)
+  par_history=matrix(ncol=length(input_par)+2,nrow=0)
+  
+  ### Run fit for separate and joint optimisation
+    copula_deriv=if(use_dlcopdpar==TRUE){1}else{0}
+    ### CORE ITERATION
+    change=1;log_lik_start=0;log_lik_change=1000;run_counter=1;step_size=start_step_size;
+    while (abs(log_lik_change)>crit_lik_change) {
+      step_size=step_size*(step_adjustment^min(max_steps,run_counter))
+      par_history=rbind(par_history,c(copula_deriv,run_counter,input_par))
+      
+      #Run optimisation
+      outer_optim_output=optim_outer(par=input_par,dataset,margin_dist,copula_dist,use_dlcopdpar=use_dlcopdpar,verbose=FALSE,step_size=step_size)
+      
+      #Capture outputs
+      input_par=outer_optim_output$par_end
+      change=sum(outer_optim_output$par_change)
+      #print(outer_optim_output$log_lik)
+      
+      log_lik=outer_optim_output$log_lik["joint"]
+      log_lik_change=log_lik-log_lik_start
+      log_lik_start=log_lik
+      
+      #Capture changes in parameters
+      log_lik_history=rbind(log_lik_history,c(copula_deriv,run_counter,outer_optim_output$log_lik))
+      run_counter=run_counter+1
+      
+    }
+    par_history=rbind(par_history,c(copula_deriv,run_counter,input_par))
+    
+    outer_optim_output=optim_outer(par=input_par,dataset,margin_dist,copula_dist,use_dlcopdpar=use_dlcopdpar,verbose=FALSE,step_size=step_size)
+    log_lik=outer_optim_output$log_lik["joint"]
+    log_lik_change=log_lik-log_lik_start
+    log_lik_start=log_lik
+    log_lik_history=rbind(log_lik_history,c(copula_deriv,run_counter,outer_optim_output$log_lik))
+    
+    colnames(log_lik_history)[1:2]=colnames(par_history)[1:2]=c("use_dlcopdpar","run_counter")
+  
+  #Plot likelihood and parameters
+  if(plot_results==TRUE) {
+    
+    plot.new()
+    par_count=round(sqrt((ncol(par_history)+1)),0)+1
+    par(mfrow=c(par_count,par_count))
+    
+    for (i in colnames(log_lik_history)[3:5]) {
+      plot( log_lik_history[,i],xlab="Iteration",ylab="LogLik",main=i,type = "l",col="blue",xlim=c(1,max(log_lik_history[,"run_counter"])))
+      #lines(log_lik_history[log_lik_history[,"use_dlcopdpar"]==0,i],xlab="LogLik",ylab="Iteration",main=i,type = "l",col="red",xlim=c(1,max(log_lik_history[,"run_counter"])),ylim=range(log_lik_history[,i]))
+      #legend("bottomright",c("Joint","Separate"), lwd=c(5,2), col=c("blue","red"))
+      
+    }
+    
+    for (i in 1:(ncol(par_history)-2)) {
+      plot(par_history[,i+2],col="blue",type="l",main=colnames(par_history)[i+2],ylab="Parameter estimate")
+      #lines(par_nodlcop[,i+2],col="red",type="l")
+      if (!all(is.na(true_val))) {
+        abline(h=true_val[i])  
+      }
+      #legend("bottomright",c("Joint","Separate"), lwd=c(5,2), col=c("blue","red"))
+    }
+  }
+    
+  return_list=list(par_history,log_lik_history)
+  names(return_list)=c("par_history","log_lik_history")
+  return(return_list)
+}
+
+
 #Given a parameter vector starting values par = (mu,sigma,nu,tau,theta,zeta), return best fit parameters
-optim_outer <- function(par,dataset,margin_dist,copula_dist,copula_link,
+optim_outer <- function(par,dataset,margin_dist,copula_dist,
                         step_size=0.1,verbose=TRUE,use_dlcopdpar=TRUE) {
   
   #print("THIS FUNCTION ASSUMES RESPONSE IS ORDERED AS TIME, SUBJECT | PAR INPUT MUST BE NAMED")
+  
+  copula_input=get_copula_dist(copula_dist)
+  copula_number=copula_input$copula_dist
+  copula_link=copula_input$copula_link
   
   num_margins=length(unique(dataset$time))
   margin_names=unique(dataset$time)
@@ -82,29 +209,29 @@ optim_outer <- function(par,dataset,margin_dist,copula_dist,copula_link,
   #Handling extreme values  
   Fx_1_2[Fx_1_2>1]=1;Fx_1_2[Fx_1_2<0]=0
   
-  if(copula_dist=="C") {
+  if(copula_number==3) {
     if(par1>28){par1=28}
   }
   
-  copula_d=BiCopPDF(  Fx_1_2[,1],Fx_1_2[,2],family = as.numeric(BiCopName(copula_dist)),par=par1,par2=par2)
-  dldth=BiCopDeriv(   Fx_1_2[,1],Fx_1_2[,2],family = as.numeric(BiCopName(copula_dist)),par=par1,par2=par2,deriv="par",log=TRUE)
-  dcdth=BiCopDeriv(   Fx_1_2[,1],Fx_1_2[,2],family = as.numeric(BiCopName(copula_dist)),par=par1,par2=par2,deriv="par",log=FALSE)
-  d2cdth=BiCopDeriv2( Fx_1_2[,1],Fx_1_2[,2],family = as.numeric(BiCopName(copula_dist)),par=par1,par2=par2,deriv="par")
+  copula_d=BiCopPDF(  Fx_1_2[,1],Fx_1_2[,2],family = copula_number,par=par1,par2=par2)
+  dldth=BiCopDeriv(   Fx_1_2[,1],Fx_1_2[,2],family = copula_number,par=par1,par2=par2,deriv="par",log=TRUE)
+  dcdth=BiCopDeriv(   Fx_1_2[,1],Fx_1_2[,2],family = copula_number,par=par1,par2=par2,deriv="par",log=FALSE)
+  d2cdth=BiCopDeriv2( Fx_1_2[,1],Fx_1_2[,2],family = copula_number,par=par1,par2=par2,deriv="par")
   d2ldth2=(1/(copula_d^2))*(copula_d*d2cdth-dcdth^2)
   if(!is.na(copula_par["zeta"])) {
-    dldz=BiCopDeriv(    Fx_1_2[,1],Fx_1_2[,2],family = as.numeric(BiCopName(copula_dist)),par=par1,par2=par2,deriv="par2",log=TRUE)
-    dcdz=BiCopDeriv(    Fx_1_2[,1],Fx_1_2[,2],family = as.numeric(BiCopName(copula_dist)),par=par1,par2=par2,deriv="par2",log=FALSE)
-    d2cdz=BiCopDeriv2(  Fx_1_2[,1],Fx_1_2[,2],family = as.numeric(BiCopName(copula_dist)),par=par1,par2=par2,deriv="par2")  
+    dldz=BiCopDeriv(    Fx_1_2[,1],Fx_1_2[,2],family = copula_number,par=par1,par2=par2,deriv="par2",log=TRUE)
+    dcdz=BiCopDeriv(    Fx_1_2[,1],Fx_1_2[,2],family = copula_number,par=par1,par2=par2,deriv="par2",log=FALSE)
+    d2cdz=BiCopDeriv2(  Fx_1_2[,1],Fx_1_2[,2],family = copula_number,par=par1,par2=par2,deriv="par2")  
     d2ldz2=(1/(copula_d^2))*(copula_d*d2cdz-dcdz^2)
     
-    d2cdthdz=BiCopDeriv2(  Fx_1_2[,1],Fx_1_2[,2],family = as.numeric(BiCopName(copula_dist)),par=par1,par2=par2,deriv="par1par2")  
+    d2cdthdz=BiCopDeriv2(  Fx_1_2[,1],Fx_1_2[,2],family = copula_number,par=par1,par2=par2,deriv="par1par2")  
     d2ldthdz=(d2cdthdz*copula_d-dcdth*dcdz)/(copula_d^2)
   }
-  dcdu1=BiCopDeriv(   Fx_1_2[,1],Fx_1_2[,2],family = as.numeric(BiCopName(copula_dist)),par=par1,par2=par2,deriv="u1",log=FALSE)
-  dcdu2=BiCopDeriv(   Fx_1_2[,1],Fx_1_2[,2],family = as.numeric(BiCopName(copula_dist)),par=par1,par2=par2,deriv="u2",log=FALSE)
+  dcdu1=BiCopDeriv(   Fx_1_2[,1],Fx_1_2[,2],family = copula_number,par=par1,par2=par2,deriv="u1",log=FALSE)
+  dcdu2=BiCopDeriv(   Fx_1_2[,1],Fx_1_2[,2],family = copula_number,par=par1,par2=par2,deriv="u2",log=FALSE)
   
-  d2cdu12=BiCopDeriv(   Fx_1_2[,1],Fx_1_2[,2],family = as.numeric(BiCopName(copula_dist)),par=par1,par2=par2,deriv="u1",log=FALSE)
-  d2cdu22=BiCopDeriv(   Fx_1_2[,1],Fx_1_2[,2],family = as.numeric(BiCopName(copula_dist)),par=par1,par2=par2,deriv="u2",log=FALSE)
+  d2cdu12=BiCopDeriv(   Fx_1_2[,1],Fx_1_2[,2],family = copula_number,par=par1,par2=par2,deriv="u1",log=FALSE)
+  d2cdu22=BiCopDeriv(   Fx_1_2[,1],Fx_1_2[,2],family = copula_number,par=par1,par2=par2,deriv="u2",log=FALSE)
   
   d2ldth2[!is.finite(d2ldth2)]=0
   
@@ -252,9 +379,9 @@ optim_outer <- function(par,dataset,margin_dist,copula_dist,copula_link,
   #score=score
   #weights=-solve(hessian)
   
-  #weights_eta=-solve(hessian*par_eta_dr*par_eta_dr)
+  weights_eta=-solve(hessian*par_eta_dr*par_eta_dr)
   
-  weights_eta=-1/(score*score*par_eta_dr*par_eta_dr)
+  #weights_eta=diag(1/(score*score*par_eta_dr*par_eta_dr))
   score_eta=score*par_eta_dr
   #par_end=par*(1-step_size) + step_size*(par+par_change)
   
@@ -291,14 +418,15 @@ optim_outer <- function(par,dataset,margin_dist,copula_dist,copula_link,
   if(verbose==TRUE) {
     print("Start Parameters")
     print(par)
+    print("End Parameters:")
+    print(par_end)
     print("Score:")
     print(score)
     print("Hessian:")
     print(hessian)
-    print("Change:")
-    print(par_change)
-    print("End Parameters:")
-    print(par_end)
+    print("Weights:")
+    print(weights_eta)
+    
     print(log_lik)
   }
   
@@ -467,6 +595,8 @@ calc_likelihood_minimal <- function(eta_inv,mm,margin_dist,copula_dist) {
   }
   names(order_copula)=c("time1","subject1","time2","subject2")
   
+  Fx_1_2[Fx_1_2>1]=1;Fx_1_2[Fx_1_2<0]=0
+  
   par1=eta_inv[["theta"]]
   if(!"zeta" %in% names(eta_inv)) {par2=eta_inv[["theta"]]*0} else {par2=eta_inv[["zeta"]]}
   
@@ -518,6 +648,109 @@ score_function_v2 <- function(eta,dldpar,d2ldpar,dpardeta,response=NA,phi=1,step
 
 
 
+
+get_copula_dist=function(copula_dist) {
+  
+  if(copula_dist=="C" | copula_dist=="Clayton") {
+    copula_link=list(log,exp,dloginv=exp); two_par_cop=FALSE
+    copula_dist=BiCopName(copula_dist)
+    parameters=c("theta")
+  }
+
+  if(two_par_cop) {names(copula_link)=c("theta.linkfun","theta.linkinv","theta.dr","zeta.linkfun","zeta.linkinv","zeta.dr")} else {names(copula_link)=c("theta.linkfun","theta.linkinv","theta.dr")}
+  
+  return_list=list()
+  return_list[["copula_link"]]=copula_link
+  return_list[["copula_dist"]]=copula_dist
+  return_list[["parameters"]]=parameters
+
+  return(return_list)
+}
+
+
+
+
+
+#### LINK FUNCTIONS ####
+
+
+logit <- function(x) {
+  return(log(x/(1-x)))
+}
+
+logit_inv <- function(x) {
+  return(
+    if(is.nan(exp(x)/(1+exp(x)))) {
+      return(1)
+    } else {
+      return(exp(x)/(1+exp(x)))
+    }
+  )
+}
+
+dlogit <- function(x) {
+  return(1/(x-(x^2)))
+}
+
+logit28 <- function(x) {
+  return(log(x/(28-x)))
+}
+
+logit28_inv <- function(x) {
+  return(
+    if(is.nan(exp(x)/(1+exp(x)))) {
+      return(1)
+    } else {
+      return(28*exp(x)/(1+exp(x)))
+    }
+  )
+}
+
+dlogit28 <- function(x) {
+  return(1/(28*x-(x^2)))
+}
+
+
+log_2plus <- function(x) {
+  return(
+    log(x-2)
+  )
+}
+
+log_2plus_inv <- function(x) {
+  y=exp(x)+2
+  #Adjust for error when close to two.
+  y[y==2]=y[y==2]+0.00001
+  return(y)
+}
+
+dlog_2plus <- function(x) {
+  return(-1/(x-2))
+}
+
+dlog <-function(x) {
+  return(1/x)
+}
+
+dlog_inv <-function(x) {
+  return(exp(x))
+}
+
+dlogit_inv <- function(x) {
+  return(exp(x)/((1+exp(x))^2))
+}
+
+dlog_2plus_inv <- function(x) {
+  return(exp(x))
+}
+
+
+
+
+
+
+
+############ OLDER FUNCTIONS, TO UPDATE OR CHECK ####
 generateBivDist <- function(n,a,b,c,mu1,mu2,dist) {
   
   if(dist=="GA") {
@@ -1131,76 +1364,6 @@ likelihood_fitted_margin_copula <- function(fitted_margins,fitted_copulas) {
   )
   
 } ###List of gamlss objects, VineCopula object as input
-
-logit <- function(x) {
-  return(log(x/(1-x)))
-}
-
-logit_inv <- function(x) {
-  return(
-    if(is.nan(exp(x)/(1+exp(x)))) {
-      return(1)
-    } else {
-      return(exp(x)/(1+exp(x)))
-    }
-  )
-}
-
-dlogit <- function(x) {
-  return(1/(x-(x^2)))
-}
-
-logit28 <- function(x) {
-  return(log(x/(28-x)))
-}
-
-logit28_inv <- function(x) {
-  return(
-    if(is.nan(exp(x)/(1+exp(x)))) {
-      return(1)
-    } else {
-      return(28*exp(x)/(1+exp(x)))
-    }
-  )
-}
-
-dlogit28 <- function(x) {
-  return(1/(28*x-(x^2)))
-}
-
-
-log_2plus <- function(x) {
-  return(
-    log(x-2)
-  )
-}
-
-log_2plus_inv <- function(x) {
-  y=exp(x)+2
-  #Adjust for error when close to two.
-  y[y==2]=y[y==2]+0.00001
-  return(y)
-}
-
-dlog_2plus <- function(x) {
-  return(-1/(x-2))
-}
-
-dlog <-function(x) {
-  return(1/x)
-}
-
-dlog_inv <-function(x) {
-  return(exp(x))
-}
-
-dlogit_inv <- function(x) {
-  return(exp(x)/((1+exp(x))^2))
-}
-
-dlog_2plus_inv <- function(x) {
-  return(exp(x))
-}
 
 
 #Generate the copula model matrix
@@ -1894,7 +2057,7 @@ newton_raphson_iteration=function(results,input_par,phi=1,step_size=1,verbose=c(
   ########
 }
 
-loadDataset <- function(simOption,plot_dist=FALSE,n=100,d=3,copula.family=1,copula.link=NA,qFUN,par.copula,par.margin) {
+loadDataset <- function(simOption=5,plot_dist=FALSE,n=100,d=3,copula_dist=NA, margin_dist,copula.link=NA,par.copula,par.margin) {
 
   if (simOption==1) {
     load("Data/rand_mvt.rds")
@@ -1974,10 +2137,10 @@ loadDataset <- function(simOption,plot_dist=FALSE,n=100,d=3,copula.family=1,copu
     margin=matrix(0,ncol=ncol(copsim),nrow=nrow(copsim))
     for ( i in 1:ncol(copsim)) {
       
-      input_list=list(p=copsim[,i],mu=exp(par.margin[1]+par.margin[2]*i),sigma=exp(0.3+0.2*i),nu=-0.8,tau=0.1)
+      input_list=list(p=copsim[,i],mu=exp(par.margin[1]+par.margin[2]*i),sigma=exp(1),nu=1,tau=0.1)
       args=names(input_list)[names(input_list)%in%formalArgs(qFUN)]
       qFunOutput_1=do.call(qFUN,args=(input_list[args]))
-      input_list=list(p=copsim[,i],mu=exp(par.margin[1]+par.margin[2]*i+par.margin[3]),sigma=exp(0.3+0.2*i+0.1),nu=-0.8,tau=0.1)
+      input_list=list(p=copsim[,i],mu=exp(par.margin[1]+par.margin[2]*i+par.margin[3]),sigma=exp(1),nu=1,tau=0.1)
       args=names(input_list)[names(input_list)%in%formalArgs(qFUN)]
       qFunOutput_2=do.call(qFUN,args=(input_list[args]))
       
@@ -2038,6 +2201,11 @@ loadDataset <- function(simOption,plot_dist=FALSE,n=100,d=3,copula.family=1,copu
     dataset<-create_longitudinal_dataset(response,covariates,labels=c("subject","time","response","age","year","gender"))
     
   } else if (simOption==5) {
+    
+    copula_input=get_copula_dist(copula_dist)
+    copula.family=copula_input$copula_dist
+    
+    qFUN=paste("q",margin_dist$family[1],sep="")
     
     # set up D-vine copula model with mixed pair-copulas
     d <- d
