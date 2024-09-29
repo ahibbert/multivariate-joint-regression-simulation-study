@@ -140,13 +140,14 @@ fit_jointreg=function(  dataset,
         } else {
           margin_par=names(mm)[names(mm) %in% c("mu","sigma","nu","tau")]
           response=dataset$response
+          
           #Extract margin calculations for F(x), f(x), response and derivatives at time 1 and time 2, join to copula values for time 1 and time 2
-          margin_deriv_1=margin_deriv_2=margin_deriv_2cross=matrix(ncol=length(margin_par),nrow=length(response))
-          for (i in 1:length(margin_par)) {
-            margin_deriv_1[,i]=margin_deriv[grepl("dld",names(margin_deriv))][[i]]
-            #margin_deriv_2[,i]=margin_deriv[grepl("d2ld",names(margin_deriv))&endsWith(names(margin_deriv),"2")][[i]]
-          }
+          margin_deriv_1=matrix(0,ncol=length(margin_par),nrow=length(response))
           colnames(margin_deriv_1)=paste("dld",margin_par,sep="")
+          #margin_deriv_2=margin_deriv_2cross
+          margin_deriv_1[,paste("dld",par_name,sep="")]=margin_deriv[grepl("dld",names(margin_deriv))][[which(margin_par==par_name)]]  
+          #margin_deriv_2[,i]=margin_deriv[grepl("d2ld",names(margin_deriv))&endsWith(names(margin_deriv),"2")][[i]]
+          
           #colnames(margin_deriv_2)=paste("d2ld",names(margin_par),sep="")
           
           order_margin=dataset[,c("time","subject")]
@@ -195,7 +196,6 @@ fit_jointreg=function(  dataset,
           par_dlcopdpar=dlcopdpar[,paste("dlcopd",margin_par,sep="")]
           merged_dlcopdpar=merge(cbind(order_copula,par_dlcopdpar),cbind(order_copula,par_dlcopdpar),by.x=c("time2","subject2"),by.y=c("time1","subject1"),all=TRUE)
           merged_dlcopdpar[is.na(merged_dlcopdpar)]=0
-          
           
           x_comp=grepl("dlcopd",colnames(merged_dlcopdpar))&grepl(".x",colnames(merged_dlcopdpar))
           y_comp=grepl("dlcopd",colnames(merged_dlcopdpar))&grepl(".y",colnames(merged_dlcopdpar))
