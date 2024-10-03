@@ -10,8 +10,8 @@ fit_jointreg=function(  dataset,
                         theta.formula=("~1"),
                         zeta.formula=("~1"),
                         include_dlcopdpar=TRUE,
-                        inner_stop_crit=.05,
-                        outer_stop_crit=.1,
+                        inner_stop_crit=.01,
+                        outer_stop_crit=.0001,
                         start_step_size=.5,
                         step_adjustment=.5,
                         max_steps=5,
@@ -21,8 +21,8 @@ fit_jointreg=function(  dataset,
                         true_val=NA,
                         method="RS",
                         max_outer_iter=100,
-                        max_inner_iter=20
-                        
+                        max_inner_iter=20,
+                        use_Rcpp=FALSE
                       ) 
 {
   
@@ -75,7 +75,7 @@ fit_jointreg=function(  dataset,
     for (par_name in names(mm)) {
       
       if(verbose > 2) {
-        print(paste("INNTER ITERATION: Parameter:",par_name))
+        print(paste("INNER ITERATION: Parameter:",par_name))
       }
       
       first_inner_run=TRUE; change_log_lik=0; beta_change_inner=99
@@ -83,6 +83,9 @@ fit_jointreg=function(  dataset,
       inner_run_counter=1
       
       while ( (first_inner_run==TRUE | abs(change_log_lik)>inner_stop_crit) & inner_run_counter<max_inner_iter) { #
+        
+        timer=c()
+        timer_start=Sys.time()
         
         first_inner_run=FALSE
         eta_out=calc_eta(par_cov,mm,margin_dist,copula_link)
@@ -95,6 +98,10 @@ fit_jointreg=function(  dataset,
           outer_start_log_lik=log_lik["joint"]; first_outer_run=FALSE
         }
         
+        timer=c(timer,difftime(Sys.time(),timer_start,units="secs"))
+        names(timer)[length(timer)]=paste("Calc Lik")
+        
+        #Calculate numerical derivatives for F(x) - also used as a reference for overall likelihood derivative
         nd_impact=nd_impact_m=nd_impact_c=par_eta*0
         nd_impact_F=list()
         for (eta_par_names_nd in names(eta_inv)) {
@@ -108,7 +115,8 @@ fit_jointreg=function(  dataset,
             #change[i]=calc_likelihood_minimal(eta_inv_adj,mm,margin_dist,copula_dist)$log_lik["joint"]
             #change_m[i]=calc_likelihood_minimal(eta_inv_adj,mm,margin_dist,copula_dist)$log_lik["marginal"]
             #change_c[i]=calc_likelihood_minimal(eta_inv_adj,mm,margin_dist,copula_dist)$log_lik["copula"]
-            change_F[,i]=calc_likelihood_minimal(eta_inv_adj,mm,margin_dist,copula_dist)$margin_p
+            change_F[,i]=calc_F_x(eta_inv_adj,mm,margin_dist)#calc_likelihood_minimal(eta_inv_adj,mm,margin_dist,copula_dist)$margin_p
+            #print(change_F[,i]==calc_F_x(eta_inv_adj,mm,margin_dist))
             i=i+1
           }
           #nd_impact[eta_par_names_nd]=(change[2]-change[1])/(2*adj_fac)
@@ -116,6 +124,8 @@ fit_jointreg=function(  dataset,
           #nd_impact_c[eta_par_names_nd]=(change_c[2]-change_c[1])/(2*adj_fac)
           nd_impact_F[[eta_par_names_nd]]=(change_F[,2]-change_F[,1])/(2*adj_fac)
         }
+        timer=c(timer,difftime(Sys.time(),timer_start,units="secs"))
+        names(timer)[length(timer)]=paste("Numerical Derivatives")
 
         #Given par_cov and mm, calculate eta, dldpar, d2ldpar, dpardeta
         
@@ -125,6 +135,11 @@ fit_jointreg=function(  dataset,
         Fx_1_2[Fx_1_2>1]=1;Fx_1_2[Fx_1_2<0]=0
         
         par1=eta_inv[["theta"]]
+        
+        if(copula_dist=="C") {
+          par1[par1>=28]=27.9  
+        }
+        
         if(!"zeta" %in% names(eta_inv)) {par2=eta_inv[["theta"]]*0} else {par2=eta_inv[["zeta"]]}
         dldth=BiCopDeriv(   Fx_1_2[,1],Fx_1_2[,2],family = as.numeric(BiCopName(copula_dist)),par=par1,par2=par2,deriv="par",log=TRUE)
         dcdth=BiCopDeriv(   Fx_1_2[,1],Fx_1_2[,2],family = as.numeric(BiCopName(copula_dist)),par=par1,par2=par2,deriv="par",log=FALSE)
@@ -149,6 +164,9 @@ fit_jointreg=function(  dataset,
           #d2ldz2[!is.finite(d2ldz2)]=0
           #d2ldthdz[!is.finite(d2ldthdz)]=0
         }
+        
+        timer=c(timer,difftime(Sys.time(),timer_start,units="secs"))
+        names(timer)[length(timer)]=paste("Copula Derivatives")
         
         ### Calculate copula derivatives w.r.t margin parameters
         if(!par_name %in% c("mu","sigma","nu","tau")) {
@@ -263,6 +281,11 @@ fit_jointreg=function(  dataset,
             #d1=d1*0+(nd_impact[par_name]/nrow(d1))
           }
           
+          timer=c(timer,difftime(Sys.time(),timer_start,units="secs"))
+          names(timer)[length(timer)]=paste("Margin Derivatives")
+          
+          if(verbose>=4) {print(timer)}
+          
           d1=d1[,grepl(par_name,colnames(d1))]
           
           if(include_dlcopdpar==FALSE) {d1_cop=d1*0; d1_m=d1}
@@ -272,6 +295,8 @@ fit_jointreg=function(  dataset,
           #print(nd)
         }
         
+        
+        ### BACKFITTING STEP
         score=score_function_v2(eta=eta[[par_name]],dldpar=d1,d2ldpar=-(d1*d1),dpardeta=eta_dr[[par_name]])
         
         X=as.matrix(mm[[par_name]])
@@ -279,20 +304,25 @@ fit_jointreg=function(  dataset,
         z_k=score$z_k
         beta_start=par_cov[paste(paste(par_name,sep=" "),colnames(mm[[par_name]]),sep=".")]
         
-        t_x_w=eigenMapMatMult(t(X),W)
-        t_x_w_x=eigenMapMatMult(t_x_w,X)
-        
-        inv_t_x_w_x=tryCatch( chol2inv(chol(t_x_w_x)), 
-                              error=function(e) {
-                                                  return(solve(t_x_w_x))
-                                                }
-        )
-        
-        
-        update_no_z_k=eigenMapMatMult(inv_t_x_w_x,t_x_w)
-        beta_update=eigenMapMatMult(update_no_z_k,z_k)
+        if(use_Rcpp==TRUE) {
+          library(Rcpp)
+          sourceCpp("test.cpp")
+          t_x_w=eigenMapMatMult(t(X),W)
+          t_x_w_x=eigenMapMatMult(t_x_w,X)
           
-        #beta_update=as.vector(solve(t(X)%*%W%*%X)%*%t(X)%*%W%*%z_k)
+          inv_t_x_w_x=tryCatch( chol2inv(chol(t_x_w_x)), 
+                                error=function(e) {
+                                                    return(solve(t_x_w_x))
+                                                  }
+          )
+          
+          
+          update_no_z_k=eigenMapMatMult(inv_t_x_w_x,t_x_w)
+          beta_update=eigenMapMatMult(update_no_z_k,z_k)
+        } else {
+          beta_update=as.vector(solve(t(X)%*%W%*%X)%*%t(X)%*%W%*%z_k)
+        }
+        
         beta_change_inner=beta_update-beta_start
         beta=beta_start*(1-step_size) + (step_size)*(beta_update)
         names(beta)=paste(paste(par_name,sep=" "),colnames(mm[[par_name]]),sep=".")
@@ -300,9 +330,11 @@ fit_jointreg=function(  dataset,
         par_cov_new=par_cov
         par_cov_new[names(beta)]=beta
         
+        timer=c(timer,difftime(Sys.time(),timer_start,units="secs"))
+        names(timer)[length(timer)]=paste("Backfitting")
+
         eta_out=calc_eta(par_cov_new,mm,margin_dist,copula_link)
         
-        #Update parameters
         eta=eta_out$eta; eta_dr=eta_out$eta_dr; eta_inv=eta_out$eta_inv
         par_cov=par_cov_new
         
@@ -339,10 +371,13 @@ fit_jointreg=function(  dataset,
           }
         }
         
+        timer=c(timer,difftime(Sys.time(),timer_start,units="secs"))
+        names(timer)[length(timer)]=paste("Plotting")
+        #print(timer)
+        
         change_log_lik=calc_lik_out_end$log_lik["joint"]-calc_lik_out$log_lik["joint"]
         
         run_counter=run_counter+1
-        
         outer_run_counter=outer_run_counter+1
         inner_run_counter=inner_run_counter+1
       }
@@ -390,6 +425,7 @@ get_starting_values = function(copula_dist,margin_dist,dataset,eta_transform=FAL
   
   require("moments")
   
+  
   margin_names=unique(dataset$time)
   num_margins=length(margin_names)
   
@@ -405,13 +441,6 @@ get_starting_values = function(copula_dist,margin_dist,dataset,eta_transform=FAL
       , skewness(dataset$response)
       , kurtosis(dataset$response)
     )
-  } else if (margin_dist$family[1]=="ST1") {
-    margin_par=c(
-      mean(dataset$response)/2
-      , sd(dataset$response)
-      , skewness(dataset$response)
-      , kurtosis(dataset$response)
-    )
   } else if (margin_dist$family[1]=="NO") {
     margin_par=c(
       mean(dataset$response)
@@ -424,29 +453,15 @@ get_starting_values = function(copula_dist,margin_dist,dataset,eta_transform=FAL
   } else if (margin_dist$family[1]=="NBI") {
     margin_par=c(
       mean(dataset$response),
-      sd(dataset$response)/mean(response)
-    )
-  } else if (margin_dist$family[1]=="ZISICHEL" | margin_dist$family[1]=="SICHEL") {
-    margin_par=c(
-      mean(dataset$response)
-      , sd(dataset$response)
-      , skewness(dataset$response)
-      , mean(dataset$response==0)
-    )
-  } else if (margin_dist$family[1]=="JSUo") {
-    margin_par=c(
-      0.1
-      , exp(-4)
-      , -2
-      , exp(-1)
+      sd(dataset$response)/mean(dataset$response)
     )
   } else {
-    print("ERROR: MARGIN DISTRIBUTION STARTING VALUES NOT DEFINED, STARTING FROM MEAN, SD, SKEWNESS, KURTOSIS")
-    margin_par=c(
-      mean(dataset$response)
-      , sd(dataset$response)
-      , skewness(dataset$response)
-      , kurtosis(dataset$response))
+    print("ERROR: MARGIN DISTRIBUTION STARTING VALUES NOT DEFINED, STARTING FROM GAMLSS START")
+    require("gamlss")
+    start_fit=gamlss(dataset$response~1, family=margin_dist,method=RS(1))
+    margin_par_temp=unlist(coefAll(start_fit))
+    names(margin_par_temp)=names(margin_dist$parameters)
+    margin_par=eta_to_par(margin_par_temp,margin_dist,get_copula_dist(copula_dist))
   }
 
   names(margin_par)=names(margin_dist$parameters)
@@ -1231,6 +1246,31 @@ calc_eta=function(par_cov,mm,margin_dist,copula_link) {
 }
 
 
+calc_F_x <- function(eta_inv,mm,margin_dist) {
+  #Setup input matrix of response and parameters 
+  response=dataset$response
+  num_margins=length(unique(dataset$time))
+  margin_names=unique(dataset$time)
+  
+  margin_deriv_input=list()
+  margin_deriv_input[["y"]]=response
+  margin_deriv_input[["q"]]=response
+  margin_deriv_input[["x"]]=response
+  for (par_name in names(mm)) {
+    if (par_name %in% c("mu","sigma","nu","tau")) {
+      margin_deriv_input[[par_name]]=eta_inv[[par_name]]
+    }
+  }
+  
+  margin_pFUN=eval(parse( text=paste("p",margin_dist$family[1],sep="") ))
+  FUN=margin_pFUN
+  FUN_args=names(margin_deriv_input)[names(margin_deriv_input)%in%formalArgs(FUN)]
+  margin_p=do.call(FUN,args=margin_deriv_input[FUN_args])
+  
+  return(margin_p)
+}
+
+
 calc_likelihood_minimal <- function(eta_inv,mm,margin_dist,copula_dist) {
   #Setup input matrix of response and parameters 
   response=dataset$response
@@ -1280,6 +1320,10 @@ calc_likelihood_minimal <- function(eta_inv,mm,margin_dist,copula_dist) {
   
   par1=eta_inv[["theta"]]
   if(!"zeta" %in% names(eta_inv)) {par2=eta_inv[["theta"]]*0} else {par2=eta_inv[["zeta"]]}
+  
+  if(copula_dist=="C") {
+    par1[par1>=28]=27.9
+  }
   
   copula_d=BiCopPDF(  Fx_1_2[,1],Fx_1_2[,2],family = as.numeric(BiCopName(copula_dist)),par=par1,par2=par2)
   
@@ -1333,10 +1377,14 @@ get_copula_dist=function(copula_dist) {
     copula_dist=BiCopName(copula_dist)
     parameters=c("theta")
   }
-  if(copula_dist=="N" | copula_dist=="Normal") {
+  else if(copula_dist=="N" | copula_dist=="Normal") {
     copula_link=list(logit,logit_inv,dlogit_inv); two_par_cop=FALSE
     copula_dist=BiCopName(copula_dist)
     parameters=c("theta")
+  } else if(copula_dist=="t" | copula_dist=="Normal") {
+    copula_link=list(logit,logit_inv,dlogit_inv,log_2plus,log_2plus_inv,dlog_2plus_inv); two_par_cop=TRUE
+    copula_dist=BiCopName(copula_dist)
+    parameters=c("theta","zeta")
   }
 
   if(two_par_cop) {names(copula_link)=c("theta.linkfun","theta.linkinv","theta.dr","zeta.linkfun","zeta.linkinv","zeta.dr")} else {names(copula_link)=c("theta.linkfun","theta.linkinv","theta.dr")}
